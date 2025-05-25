@@ -1,0 +1,1661 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Alpaca API Service",
+    "description": "A lightweight API service for Alpaca Markets integration with artificial order management and centralized configuration",
+    "version": "1.0.0",
+    "contact": {
+      "name": "API Support",
+      "url": "https://github.com/yourusername/alpaca-service"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:9000",
+      "description": "Local development server"
+    }
+  ],
+  "paths": {
+    "/api/config": {
+      "get": {
+        "summary": "Get current configuration",
+        "tags": ["Configuration"],
+        "operationId": "getConfig",
+        "responses": {
+          "200": {
+            "description": "Current configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Update configuration",
+        "tags": ["Configuration"],
+        "operationId": "updateConfig",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Configuration updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config/validate": {
+      "post": {
+        "summary": "Validate configuration",
+        "tags": ["Configuration"],
+        "operationId": "validateConfig",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config/limits": {
+      "get": {
+        "summary": "Get rate limit status",
+        "tags": ["Configuration"],
+        "operationId": "getRateLimits",
+        "responses": {
+          "200": {
+            "description": "Rate limit status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/account": {
+      "get": {
+        "summary": "Get account information",
+        "tags": ["Account"],
+        "operationId": "getAccount",
+        "responses": {
+          "200": {
+            "description": "Account information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/positions": {
+      "get": {
+        "summary": "Get all positions",
+        "tags": ["Positions"],
+        "operationId": "getPositions",
+        "responses": {
+          "200": {
+            "description": "List of positions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PositionsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/positions/{symbol}": {
+      "get": {
+        "summary": "Get specific position",
+        "tags": ["Positions"],
+        "operationId": "getPosition",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stock symbol"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Position details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PositionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Position not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/orders": {
+      "post": {
+        "summary": "Place order",
+        "tags": ["Orders"],
+        "operationId": "placeOrder",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Order placed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Duplicate order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit or cooldown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Get orders",
+        "tags": ["Orders"],
+        "operationId": "getOrders",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["open", "closed", "all"]
+            }
+          },
+          {
+            "name": "symbol",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "side",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["buy", "sell"]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 50
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "startDate",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "endDate",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of orders",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrdersResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/orders/{orderId}": {
+      "get": {
+        "summary": "Get order details",
+        "tags": ["Orders"],
+        "operationId": "getOrder",
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Order details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Cancel order",
+        "tags": ["Orders"],
+        "operationId": "cancelOrder",
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Order cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelOrderResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/orders/history": {
+      "get": {
+        "summary": "Get order history",
+        "tags": ["Orders"],
+        "operationId": "getOrderHistory",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "side",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["buy", "sell"]
+            }
+          },
+          {
+            "name": "startDate",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "endDate",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 100
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Order history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderHistoryResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/artificial-orders": {
+      "post": {
+        "summary": "Create artificial order",
+        "tags": ["Artificial Orders"],
+        "operationId": "createArtificialOrder",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtificialOrderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Artificial order created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtificialOrderResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Get artificial orders",
+        "tags": ["Artificial Orders"],
+        "operationId": "getArtificialOrders",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["pending", "triggered", "executed", "cancelled"]
+            }
+          },
+          {
+            "name": "symbol",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of artificial orders",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtificialOrdersResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/artificial-orders/{artificialId}": {
+      "get": {
+        "summary": "Get artificial order",
+        "tags": ["Artificial Orders"],
+        "operationId": "getArtificialOrder",
+        "parameters": [
+          {
+            "name": "artificialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Artificial order details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtificialOrderDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Artificial order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Cancel artificial order",
+        "tags": ["Artificial Orders"],
+        "operationId": "cancelArtificialOrder",
+        "parameters": [
+          {
+            "name": "artificialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Artificial order cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelArtificialOrderResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Artificial order not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/artificial-orders/status": {
+      "get": {
+        "summary": "Get artificial order engine status",
+        "tags": ["Artificial Orders"],
+        "operationId": "getArtificialOrdersStatus",
+        "responses": {
+          "200": {
+            "description": "Engine status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtificialOrdersStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/market/quote/{symbol}": {
+      "get": {
+        "summary": "Get latest quote",
+        "tags": ["Market Data"],
+        "operationId": "getQuote",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Latest quote",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/market/bars/{symbol}": {
+      "get": {
+        "summary": "Get historical bars",
+        "tags": ["Market Data"],
+        "operationId": "getBars",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "timeframe",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["1Min", "5Min", "15Min", "1Hour", "1Day"]
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Historical bars",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BarsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/market/subscribe": {
+      "post": {
+        "summary": "Subscribe to market data",
+        "tags": ["Market Data"],
+        "operationId": "subscribeMarketData",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscribeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Subscription successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscribeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "summary": "Get service health",
+        "tags": ["Health"],
+        "operationId": "getHealth",
+        "responses": {
+          "200": {
+            "description": "Service health",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health/alpaca": {
+      "get": {
+        "summary": "Get Alpaca connection status",
+        "tags": ["Health"],
+        "operationId": "getAlpacaHealth",
+        "responses": {
+          "200": {
+            "description": "Alpaca connection status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlpacaHealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health/orders": {
+      "get": {
+        "summary": "Get order engine status",
+        "tags": ["Health"],
+        "operationId": "getOrdersHealth",
+        "responses": {
+          "200": {
+            "description": "Order engine status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrdersHealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/status": {
+      "get": {
+        "summary": "Get detailed service status",
+        "tags": ["Health"],
+        "operationId": "getStatus",
+        "responses": {
+          "200": {
+            "description": "Detailed service status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ServiceConfig": {
+        "type": "object",
+        "properties": {
+          "runtime": {
+            "type": "object",
+            "description": "Settings that can be changed without service restart",
+            "properties": {
+              "alpaca": {
+                "type": "object",
+                "description": "Alpaca API settings",
+                "properties": {
+                  "apiKey": {
+                    "type": "string",
+                    "description": "Alpaca API key (masked in responses)"
+                  },
+                  "apiSecret": {
+                    "type": "string",
+                    "description": "Alpaca API secret (masked in responses)"
+                  },
+                  "paperTrading": {
+                    "type": "boolean",
+                    "description": "Use paper trading environment"
+                  }
+                }
+              },
+              "rateLimits": {
+                "type": "object",
+                "description": "Rate limiting settings",
+                "properties": {
+                  "orders": {
+                    "type": "integer",
+                    "description": "Orders per minute",
+                    "minimum": 1,
+                    "maximum": 500
+                  },
+                  "data": {
+                    "type": "integer",
+                    "description": "Data requests per minute",
+                    "minimum": 1,
+                    "maximum": 500
+                  },
+                  "burst": {
+                    "type": "integer",
+                    "description": "Burst capacity for rate limiting",
+                    "minimum": 1,
+                    "maximum": 50
+                  }
+                }
+              },
+              "orderRules": {
+                "type": "object",
+                "description": "Order management settings",
+                "properties": {
+                  "cooldownMs": {
+                    "type": "integer",
+                    "description": "Minimum time between orders in milliseconds",
+                    "minimum": 100
+                  },
+                  "duplicateWindowMs": {
+                    "type": "integer",
+                    "description": "Window for duplicate order detection in milliseconds",
+                    "minimum": 1000
+                  },
+                  "maxPerSymbol": {
+                    "type": "integer",
+                    "description": "Maximum concurrent orders per symbol",
+                    "minimum": 1
+                  },
+                  "maxTotal": {
+                    "type": "integer",
+                    "description": "Maximum total concurrent orders",
+                    "minimum": 1
+                  }
+                }
+              },
+              "marketHours": {
+                "type": "object",
+                "description": "Market hours settings",
+                "properties": {
+                  "enablePreMarket": {
+                    "type": "boolean",
+                    "description": "Enable pre-market order execution"
+                  },
+                  "enableAfterHours": {
+                    "type": "boolean",
+                    "description": "Enable after-hours order execution"
+                  }
+                }
+              },
+              "monitoring": {
+                "type": "object",
+                "description": "Monitoring settings",
+                "properties": {
+                  "priceCheckIntervalMs": {
+                    "type": "integer",
+                    "description": "Price monitoring interval in milliseconds",
+                    "minimum": 50
+                  },
+                  "websocketHeartbeatMs": {
+                    "type": "integer",
+                    "description": "WebSocket heartbeat interval"
+                  }
+                }
+              }
+            }
+          },
+          "startup": {
+            "type": "object",
+            "description": "Settings that require service restart to take effect",
+            "properties": {
+              "apiPort": {
+                "type": "integer",
+                "description": "API service port"
+              },
+              "monitorPort": {
+                "type": "integer",
+                "description": "Monitor UI port"
+              }
+            }
+          }
+        }
+      },
+      "ConfigUpdate": {
+        "type": "object",
+        "description": "Only runtime settings can be updated via the API",
+        "properties": {
+          "runtime": {
+            "type": "object",
+            "properties": {
+              "alpaca": {
+                "type": "object",
+                "properties": {
+                  "apiKey": { "type": "string" },
+                  "apiSecret": { "type": "string" },
+                  "paperTrading": { "type": "boolean" }
+                }
+              },
+              "rateLimits": {
+                "type": "object",
+                "properties": {
+                  "orders": { "type": "integer" },
+                  "data": { "type": "integer" },
+                  "burst": { "type": "integer" }
+                }
+              },
+              "orderRules": {
+                "type": "object",
+                "properties": {
+                  "cooldownMs": { "type": "integer" },
+                  "duplicateWindowMs": { "type": "integer" },
+                  "maxPerSymbol": { "type": "integer" },
+                  "maxTotal": { "type": "integer" }
+                }
+              },
+              "marketHours": {
+                "type": "object",
+                "properties": {
+                  "enablePreMarket": { "type": "boolean" },
+                  "enableAfterHours": { "type": "boolean" }
+                }
+              },
+              "monitoring": {
+                "type": "object",
+                "properties": {
+                  "priceCheckIntervalMs": { "type": "integer" },
+                  "websocketHeartbeatMs": { "type": "integer" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "OrderRequest": {
+        "type": "object",
+        "required": ["symbol", "qty", "side", "orderType", "timeInForce"],
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Stock symbol"
+          },
+          "qty": {
+            "type": "number",
+            "description": "Order quantity"
+          },
+          "side": {
+            "type": "string",
+            "enum": ["buy", "sell"],
+            "description": "Order side"
+          },
+          "orderType": {
+            "type": "string",
+            "enum": ["market", "limit", "stop", "stop_limit"],
+            "description": "Order type"
+          },
+          "timeInForce": {
+            "type": "string",
+            "enum": ["day", "gtc", "opg", "cls", "ioc", "fok"],
+            "description": "Time in force"
+          },
+          "limitPrice": {
+            "type": "number",
+            "description": "Limit price (required for limit orders)"
+          },
+          "stopPrice": {
+            "type": "number",
+            "description": "Stop price (required for stop orders)"
+          },
+          "clientOrderId": {
+            "type": "string",
+            "description": "Client-specified order ID"
+          }
+        }
+      },
+      "Order": {
+        "type": "object",
+        "properties": {
+          "orderId": { "type": "string" },
+          "clientOrderId": { "type": "string" },
+          "symbol": { "type": "string" },
+          "qty": { "type": "number" },
+          "filledQty": { "type": "number" },
+          "side": { "type": "string" },
+          "orderType": { "type": "string", "readOnly": true, "description": "Order type derived by the service based on provided parameters" },
+          "timeInForce": { "type": "string" },
+          "limitPrice": { "type": "number" },
+          "stopPrice": { "type": "number" },
+          "status": { "type": "string" },
+          "filledAvgPrice": { "type": "number" },
+          "duplicateCheckPassed": { "type": "boolean" },
+          "rateLimitStatus": { "type": "string" },
+          "notes": { "type": "string" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" },
+          "submittedAt": { "type": "string", "format": "date-time" },
+          "filledAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Position": {
+        "type": "object",
+        "properties": {
+          "symbol": { "type": "string" },
+          "qty": { "type": "number" },
+          "avgEntryPrice": { "type": "number" },
+          "side": { "type": "string" },
+          "marketValue": { "type": "number" },
+          "costBasis": { "type": "number" },
+          "unrealizedPl": { "type": "number" },
+          "unrealizedPlpc": { "type": "number" },
+          "currentPrice": { "type": "number" },
+          "lastdayPrice": { "type": "number" },
+          "changeToday": { "type": "number" }
+        }
+      },
+      "ArtificialOrderRequest": {
+        "type": "object",
+        "required": ["symbol", "qty", "side", "triggerPrice"],
+        "properties": {
+          "symbol": { "type": "string" },
+          "qty": { "type": "number" },
+          "side": { "type": "string", "enum": ["buy", "sell"] },
+          "triggerPrice": { "type": "number" },
+          "limitPrice": { "type": "number" },
+          "timeInForce": { "type": "string", "enum": ["day", "gtc"] },
+          "notes": { "type": "string" }
+        }
+      },
+      "ArtificialOrder": {
+        "type": "object",
+        "properties": {
+          "artificialId": { "type": "string" },
+          "symbol": { "type": "string" },
+          "qty": { "type": "number" },
+          "side": { "type": "string" },
+          "triggerPrice": { "type": "number" },
+          "limitPrice": { "type": "number" },
+          "orderType": { "type": "string", "readOnly": true, "description": "Order type derived by the service based on provided parameters" },
+          "status": { "type": "string" },
+          "currentPrice": { "type": "number" },
+          "distanceFromTrigger": { "type": "number" },
+          "distancePercent": { "type": "number" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "triggeredAt": { "type": "string", "format": "date-time" },
+          "executedOrderId": { "type": "string" }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["error"]
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string" },
+              "detail": { "type": "string" },
+              "fields": { "type": "object", "description": "Map of field names to error messages for validation errors" },
+              "metadata": { "type": "object" }
+            }
+          }
+        }
+      },
+
+      "ConfigResponse": {
+        "type": "object",
+        "description": "Direct response without nesting",
+        "allOf": [
+          { "$ref": "#/components/schemas/ServiceConfig" }
+        ]
+      },
+      "ValidationResponse": {
+        "type": "object",
+        "description": "Direct validation response without nesting",
+        "properties": {
+          "valid": { "type": "boolean" },
+          "errors": { "type": "object", "description": "Map of field names to error messages" },
+          "warnings": { "type": "object", "description": "Map of field names to warning messages" }
+        }
+      },
+      "RateLimitsResponse": {
+        "type": "object",
+        "description": "Direct rate limits response without nesting",
+        "properties": {
+          "orders": {
+            "type": "object",
+            "properties": {
+              "limit": { "type": "integer" },
+              "remaining": { "type": "integer" },
+              "resetAt": { "type": "string", "format": "date-time" },
+              "windowMs": { "type": "integer" }
+            }
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "limit": { "type": "integer" },
+              "remaining": { "type": "integer" },
+              "resetAt": { "type": "string", "format": "date-time" },
+              "windowMs": { "type": "integer" }
+            }
+          }
+        }
+      },
+      "AccountResponse": {
+        "type": "object",
+        "description": "Direct account response without nesting",
+        "properties": {
+          "accountNumber": { "type": "string" },
+          "status": { "type": "string" },
+          "currency": { "type": "string" },
+          "buyingPower": { "type": "number" },
+          "cash": { "type": "number" },
+          "portfolioValue": { "type": "number" },
+          "patternDayTrader": { "type": "boolean" },
+          "tradingBlocked": { "type": "boolean" },
+          "transfersBlocked": { "type": "boolean" },
+          "accountBlocked": { "type": "boolean" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "PositionsResponse": {
+        "type": "array",
+        "description": "Direct array of positions without nesting",
+        "items": { "$ref": "#/components/schemas/Position" }      
+      },
+      "PositionResponse": {
+        "description": "Direct position response without nesting",
+        "allOf": [
+          { "$ref": "#/components/schemas/Position" }
+        ]
+      },
+      "OrderResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "data": { "$ref": "#/components/schemas/Order" }
+            }
+          }
+        ]
+      },
+      "OrdersResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "orders": {
+                    "type": "array",
+                    "items": { "$ref": "#/components/schemas/Order" }
+                  },
+                  "nextCursor": { "type": "string" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "OrderDetailResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "allOf": [
+                  { "$ref": "#/components/schemas/Order" },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "remainingQty": { "type": "number" },
+                      "fills": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "fillId": { "type": "string" },
+                            "qty": { "type": "number" },
+                            "price": { "type": "number" },
+                            "filledAt": { "type": "string", "format": "date-time" }
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "OrderHistoryResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "orders": {
+                    "type": "array",
+                    "items": { "$ref": "#/components/schemas/Order" }
+                  },
+                  "total": { "type": "integer" },
+                  "offset": { "type": "integer" },
+                  "limit": { "type": "integer" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "CancelOrderResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "orderId": { "type": "string" },
+                  "status": { "type": "string" },
+                  "canceledAt": { "type": "string", "format": "date-time" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ArtificialOrderResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "data": { "$ref": "#/components/schemas/ArtificialOrder" }
+            }
+          }
+        ]
+      },
+      "ArtificialOrdersResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/ArtificialOrder" }
+              }
+            }
+          }
+        ]
+      },
+      "ArtificialOrderDetailResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "data": { "$ref": "#/components/schemas/ArtificialOrder" }
+            }
+          }
+        ]
+      },
+      "CancelArtificialOrderResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "artificialId": { "type": "string" },
+                  "status": { "type": "string" },
+                  "cancelledAt": { "type": "string", "format": "date-time" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ArtificialOrdersStatusResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "engineStatus": { "type": "string" },
+                  "pendingOrders": { "type": "integer" },
+                  "triggeredToday": { "type": "integer" },
+                  "executedToday": { "type": "integer" },
+                  "failedToday": { "type": "integer" },
+                  "priceCheckIntervalMs": { "type": "integer" },
+                  "lastCheckAt": { "type": "string", "format": "date-time" },
+                  "uptime": { "type": "integer" },
+                  "marketStatus": { "type": "string" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "QuoteResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "symbol": { "type": "string" },
+                  "bidPrice": { "type": "number" },
+                  "bidSize": { "type": "integer" },
+                  "askPrice": { "type": "number" },
+                  "askSize": { "type": "integer" },
+                  "lastPrice": { "type": "number" },
+                  "lastSize": { "type": "integer" },
+                  "timestamp": { "type": "string", "format": "date-time" },
+                  "conditions": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "tape": { "type": "string" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "Bar": {
+        "type": "object",
+        "properties": {
+          "timestamp": { "type": "string", "format": "date-time" },
+          "open": { "type": "number" },
+          "high": { "type": "number" },
+          "low": { "type": "number" },
+          "close": { "type": "number" },
+          "volume": { "type": "integer" },
+          "vwap": { "type": "number" },
+          "tradeCount": { "type": "integer" }
+        }
+      },
+      "BarsResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "symbol": { "type": "string" },
+                  "bars": {
+                    "type": "array",
+                    "items": { "$ref": "#/components/schemas/Bar" }
+                  },
+                  "nextPageToken": { "type": "string" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "SubscribeRequest": {
+        "type": "object",
+        "required": ["symbols", "dataTypes"],
+        "properties": {
+          "symbols": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "dataTypes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["quotes", "trades", "bars"]
+            }
+          }
+        }
+      },
+      "SubscribeResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "subscribed": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "dataTypes": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "HealthResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "status": { "type": "string" },
+                  "timestamp": { "type": "string", "format": "date-time" },
+                  "version": { "type": "string" },
+                  "uptime": { "type": "integer" },
+                  "checks": {
+                    "type": "object",
+                    "properties": {
+                      "database": { "type": "string" },
+                      "alpaca": { "type": "string" },
+                      "websocket": { "type": "string" },
+                      "orderEngine": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "AlpacaHealthResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "connected": { "type": "boolean" },
+                  "accountStatus": { "type": "string" },
+                  "lastPing": { "type": "string", "format": "date-time" },
+                  "apiCallsRemaining": { "type": "integer" },
+                  "apiResetAt": { "type": "string", "format": "date-time" },
+                  "dataSubscriptions": { "type": "integer" },
+                  "marketStatus": { "type": "string" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "OrdersHealthResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "engineStatus": { "type": "string" },
+                  "ordersProcessedToday": { "type": "integer" },
+                  "ordersInQueue": { "type": "integer" },
+                  "averageProcessingTimeMs": { "type": "number" },
+                  "duplicatesBlockedToday": { "type": "integer" },
+                  "rateLimitBlocksToday": { "type": "integer" },
+                  "cooldownBlocksToday": { "type": "integer" },
+                  "lastProcessedAt": { "type": "string", "format": "date-time" }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "StatusResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/SuccessResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "service": {
+                    "type": "object",
+                    "properties": {
+                      "name": { "type": "string" },
+                      "version": { "type": "string" },
+                      "environment": { "type": "string" },
+                      "startedAt": { "type": "string", "format": "date-time" },
+                      "uptime": { "type": "integer" }
+                    }
+                  },
+                  "connections": {
+                    "type": "object",
+                    "properties": {
+                      "alpacaApi": { "type": "string" },
+                      "alpacaStream": { "type": "string" },
+                      "database": { "type": "string" },
+                      "websocketClients": { "type": "integer" }
+                    }
+                  },
+                  "performance": {
+                    "type": "object",
+                    "properties": {
+                      "cpuUsage": { "type": "number" },
+                      "memoryUsage": { "type": "number" },
+                      "requestsPerMinute": { "type": "integer" },
+                      "averageResponseTimeMs": { "type": "number" }
+                    }
+                  },
+                  "configuration": {
+                    "type": "object",
+                    "properties": {
+                      "orderRateLimit": { "type": "integer" },
+                      "dataRateLimit": { "type": "integer" },
+                      "maxOrdersPerSymbol": { "type": "integer" },
+                      "maxTotalOrders": { "type": "integer" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Configuration",
+      "description": "Service configuration management"
+    },
+    {
+      "name": "Account",
+      "description": "Account information"
+    },
+    {
+      "name": "Positions",
+      "description": "Position management"
+    },
+    {
+      "name": "Orders",
+      "description": "Order management with protections"
+    },
+    {
+      "name": "Artificial Orders",
+      "description": "Pre-market and after-hours artificial orders"
+    },
+    {
+      "name": "Market Data",
+      "description": "Real-time and historical market data"
+    },
+    {
+      "name": "Health",
+      "description": "Service health and status"
+    }
+  ]
+}
