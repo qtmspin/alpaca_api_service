@@ -7,15 +7,11 @@
  * Responsibilities:
  * - Fetch and display price history data for a given symbol
  * - Allow selecting different timeframes
- * - Display chart using Recharts library
+ * - Display chart using a simple canvas-based approach
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
-} from 'recharts';
-import './PriceHistoryChart.css';
 
 interface PriceHistoryProps {
   symbol: string;
@@ -48,10 +44,11 @@ const timeframeOptions = [
 ];
 
 const PriceHistoryChart: React.FC<PriceHistoryProps> = ({ symbol, onError, onLog }) => {
-  const [, setPriceHistory] = useState<PriceHistoryData | null>(null);
+  const [priceHistory, setPriceHistory] = useState<PriceHistoryData | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [timeframe, setTimeframe] = useState<string>('1Day');
   const [chartData, setChartData] = useState<any[]>([]);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const addLog = (message: string) => {
     console.log(message);
@@ -107,6 +104,7 @@ const PriceHistoryChart: React.FC<PriceHistoryProps> = ({ symbol, onError, onLog
       const date = new Date(bar.t);
       return {
         time: date.toLocaleString(),
+        timestamp: date.getTime(),
         open: bar.o,
         high: bar.h,
         low: bar.l,
@@ -115,7 +113,114 @@ const PriceHistoryChart: React.FC<PriceHistoryProps> = ({ symbol, onError, onLog
       };
     });
 
+    // Sort by timestamp to ensure correct order
+    processedData.sort((a, b) => a.timestamp - b.timestamp);
     setChartData(processedData);
+  };
+
+  const drawChart = () => {
+    const canvas = canvasRef.current;
+    if (!canvas || chartData.length === 0) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Set canvas size
+    const { width, height } = canvas.getBoundingClientRect();
+    canvas.width = width;
+    canvas.height = height;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height);
+
+    // Chart margins
+    const margin = { top: 20, right: 20, bottom: 50, left: 60 };
+    const chartWidth = width - margin.left - margin.right;
+    const chartHeight = height - margin.top - margin.bottom;
+
+    // Find min and max prices
+    const prices = chartData.map(d => d.close);
+    const minPrice = Math.min(...prices);
+    const maxPrice = Math.max(...prices);
+    const priceRange = maxPrice - minPrice;
+
+    // Scale functions
+    const xScale = (index: number) => margin.left + (index / (chartData.length - 1)) * chartWidth;
+    const yScale = (price: number) => margin.top + ((maxPrice - price) / priceRange) * chartHeight;
+
+    // Draw grid lines
+    ctx.strokeStyle = '#e0e0e0';
+    ctx.lineWidth = 1;
+
+    // Horizontal grid lines
+    for (let i = 0; i <= 5; i++) {
+      const y = margin.top + (i / 5) * chartHeight;
+      ctx.beginPath();
+      ctx.moveTo(margin.left, y);
+      ctx.lineTo(margin.left + chartWidth, y);
+      ctx.stroke();
+
+      // Price labels
+      const price = maxPrice - (i / 5) * priceRange;
+      ctx.fillStyle = '#666';
+      ctx.font = '12px Arial';
+      ctx.textAlign = 'right';
+      ctx.fillText(`$${price.toFixed(2)}`, margin.left - 5, y + 4);
+    }
+
+    // Vertical grid lines
+    for (let i = 0; i <= 4; i++) {
+      const x = margin.left + (i / 4) * chartWidth;
+      ctx.beginPath();
+      ctx.moveTo(x, margin.top);
+      ctx.lineTo(x, margin.top + chartHeight);
+      ctx.stroke();
+
+      // Time labels
+      if (i < chartData.length) {
+        const dataIndex = Math.floor((i / 4) * (chartData.length - 1));
+        const timeLabel = new Date(chartData[dataIndex].timestamp).toLocaleDateString();
+        ctx.fillStyle = '#666';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(timeLabel, x, height - 10);
+      }
+    }
+
+    // Draw price line
+    ctx.strokeStyle = '#2563eb';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+
+    chartData.forEach((point, index) => {
+      const x = xScale(index);
+      const y = yScale(point.close);
+
+      if (index === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+
+    ctx.stroke();
+
+    // Draw data points
+    ctx.fillStyle = '#2563eb';
+    chartData.forEach((point, index) => {
+      const x = xScale(index);
+      const y = yScale(point.close);
+      
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, 2 * Math.PI);
+      ctx.fill();
+    });
+
+    // Chart title
+    ctx.fillStyle = '#333';
+    ctx.font = 'bold 16px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${symbol} Price History (${timeframe})`, width / 2, 20);
   };
 
   const handleTimeframeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -128,15 +233,34 @@ const PriceHistoryChart: React.FC<PriceHistoryProps> = ({ symbol, onError, onLog
     }
   }, [symbol, timeframe]);
 
+  useEffect(() => {
+    if (chartData.length > 0) {
+      // Use requestAnimationFrame to ensure canvas is properly sized
+      requestAnimationFrame(drawChart);
+    }
+  }, [chartData]);
+
+  useEffect(() => {
+    // Redraw chart on window resize
+    const handleResize = () => {
+      if (chartData.length > 0) {
+        setTimeout(drawChart, 100);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [chartData]);
+
   return (
-    <div className="price-history-chart">
-      <div className="chart-header">
-        <h3>{symbol} Price History</h3>
-        <div className="chart-controls">
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="text-lg font-medium">{symbol} Price History</h3>
+        <div className="flex gap-2">
           <select 
             value={timeframe} 
             onChange={handleTimeframeChange}
-            className="timeframe-select"
+            className="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white text-sm"
             disabled={loading}
             aria-label="Select timeframe"
             title="Select timeframe"
@@ -148,58 +272,53 @@ const PriceHistoryChart: React.FC<PriceHistoryProps> = ({ symbol, onError, onLog
           <button 
             onClick={fetchPriceHistory} 
             disabled={loading || !symbol}
-            className="refresh-button"
+            className="px-3 py-1 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
           >
             {loading ? 'Loading...' : 'Refresh'}
           </button>
         </div>
       </div>
 
-      <div className="chart-container">
+      <div className="h-96 w-full">
         {loading ? (
-          <div className="loading-indicator">Loading price history...</div>
+          <div className="flex justify-center items-center h-full text-gray-500 dark:text-gray-400">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mr-2"></div>
+            Loading price history...
+          </div>
         ) : chartData.length > 0 ? (
-          <ResponsiveContainer width="100%" height={400}>
-            <LineChart
-              data={chartData}
-              margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis 
-                dataKey="time" 
-                tick={{ fontSize: 12 }}
-                interval="preserveStartEnd"
-                tickFormatter={(value) => {
-                  const date = new Date(value);
-                  return timeframe.includes('Min') || timeframe.includes('Hour')
-                    ? date.toLocaleTimeString()
-                    : date.toLocaleDateString();
-                }}
-              />
-              <YAxis 
-                domain={['dataMin', 'dataMax']}
-                tick={{ fontSize: 12 }}
-              />
-              <Tooltip 
-                labelFormatter={(value) => `Time: ${value}`}
-                formatter={(value: number) => [`$${value.toFixed(2)}`, '']}
-              />
-              <Legend />
-              <Line 
-                type="monotone" 
-                dataKey="close" 
-                stroke="#8884d8" 
-                activeDot={{ r: 8 }} 
-                name="Price"
-              />
-            </LineChart>
-          </ResponsiveContainer>
+          <canvas 
+            ref={canvasRef}
+            className="w-full h-full border border-gray-200 dark:border-gray-600 rounded"
+            style={{ width: '100%', height: '100%' }}
+          />
         ) : (
-          <div className="no-data-message">
+          <div className="flex justify-center items-center h-full text-gray-500 dark:text-gray-400">
             {symbol ? 'No price history data available' : 'Select a symbol to view price history'}
           </div>
         )}
       </div>
+
+      {/* Data summary */}
+      {chartData.length > 0 && (
+        <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+          <div>
+            <span className="text-gray-500 dark:text-gray-400">Data Points:</span>
+            <span className="ml-2 font-medium">{chartData.length}</span>
+          </div>
+          <div>
+            <span className="text-gray-500 dark:text-gray-400">Latest Price:</span>
+            <span className="ml-2 font-medium">${chartData[chartData.length - 1]?.close.toFixed(2)}</span>
+          </div>
+          <div>
+            <span className="text-gray-500 dark:text-gray-400">High:</span>
+            <span className="ml-2 font-medium">${Math.max(...chartData.map(d => d.high)).toFixed(2)}</span>
+          </div>
+          <div>
+            <span className="text-gray-500 dark:text-gray-400">Low:</span>
+            <span className="ml-2 font-medium">${Math.min(...chartData.map(d => d.low)).toFixed(2)}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

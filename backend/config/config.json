@@ -1,32 +1,36 @@
 {
-    "runtime": {
-      "alpaca": {
-        "apiKey": "PKKON5IWMWKI301U6ZHG",
-        "apiSecret": "JOdYOotkvgfZR9mzU3p76o606YUrj3Vu7TemnC4H",
-        "paperTrading": true
-      },
-      "rateLimits": {
-        "orders": 200,
-        "data": 200,
-        "burst": 10
-      },
-      "orderRules": {
-        "cooldownMs": 1000,
-        "duplicateWindowMs": 5000,
-        "maxPerSymbol": 5,
-        "maxTotal": 50
-      },
-      "marketHours": {
-        "enablePreMarket": true,
-        "enableAfterHours": true
-      },
-      "monitoring": {
-        "priceCheckIntervalMs": 100,
-        "websocketHeartbeatMs": 30000
-      }
+  "runtime": {
+    "alpaca": {
+      "apiKey": "PKKON5IWMWKI301U6ZHG",
+      "apiSecret": "JOdYOotkvgfZR9mzU3p76o606YUrj3Vu7TemnC4H",
+      "isPaper": true,
+      "baseUrl": "https://paper-api.alpaca.markets"
     },
-    "startup": {
-      "apiPort": 9000,
-      "monitorPort": 5900
+    "rateLimits": {
+      "orders": 200,
+      "data": 200,
+      "burst": 10
+    },
+    "orderRules": {
+      "cooldownMs": 1000,
+      "duplicateWindowMs": 5000,
+      "maxPerSymbol": 5,
+      "maxTotal": 50
+    },
+    "marketHours": {
+      "enablePreMarket": true,
+      "enableAfterHours": true
+    },
+    "monitoring": {
+      "priceCheckIntervalMs": 5000,
+      "websocketHeartbeatMs": 30000,
+      "maxRetries": 3,
+      "retryDelayMs": 1000
     }
+  },
+  "startup": {
+    "apiPort": 9000,
+    "wsPort": 9001,
+    "host": "localhost"
   }
+}

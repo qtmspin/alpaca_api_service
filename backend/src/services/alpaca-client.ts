@@ -2,7 +2,7 @@
  * alpaca-client.ts
  * 
  * Service for interacting with the Alpaca Trading API
- * Fixed to handle module import issues
+ * Fixed to handle crypto and stock data correctly with proper API endpoints
  */
 
 import { AlpacaConfig } from '../core';
@@ -52,6 +52,8 @@ export interface AlpacaClientInterface {
   // Crypto data methods
   getCryptoBarsLatest(symbols: string[]): Promise<any>;
   getCryptoBars(symbol: string, timeframe: string, start: string, end?: string, limit?: number): Promise<any>;
+  getCryptoQuotes(symbol: string, start: string, end?: string, limit?: number): Promise<any>;
+  getCryptoSnapshots(symbols: string[]): Promise<any>;
   
   // Price history methods
   getStockBars(symbol: string, timeframe: string, start: string, end?: string, limit?: number): Promise<any>;
@@ -198,11 +200,9 @@ export class AlpacaClient implements AlpacaClientInterface {
     });
   }
   
-  // Crypto data methods using direct API calls
-  async getCryptoBarsLatest(symbols: string[]): Promise<any> {
-    this.ensureClient();
+  // Crypto data methods using direct API calls with proper endpoints
+  async getCryptoSnapshots(symbols: string[]): Promise<any> {
     try {
-      // Use direct API call for crypto data
       const response = await axios.get(`https://data.alpaca.markets/v1beta3/crypto/us/snapshots`, {
         params: { symbols: symbols.join(',') },
         headers: {
@@ -213,15 +213,24 @@ export class AlpacaClient implements AlpacaClientInterface {
       });
       return response.data;
     } catch (error) {
+      console.error('Error fetching crypto snapshots:', error);
+      throw error;
+    }
+  }
+
+  async getCryptoBarsLatest(symbols: string[]): Promise<any> {
+    this.ensureClient();
+    try {
+      // Use crypto snapshots for latest data
+      return await this.getCryptoSnapshots(symbols);
+    } catch (error) {
       console.error('Error fetching crypto bars latest:', error);
       throw error;
     }
   }
   
   async getCryptoBars(symbol: string, timeframe: string, start: string, end?: string, limit?: number): Promise<any> {
-    this.ensureClient();
     try {
-      // Use direct API call for crypto bars
       const params: any = {
         symbols: symbol,
         timeframe: timeframe,
@@ -248,9 +257,7 @@ export class AlpacaClient implements AlpacaClientInterface {
   }
   
   async getCryptoQuotes(symbol: string, start: string, end?: string, limit?: number): Promise<any> {
-    this.ensureClient();
     try {
-      // Use direct API call for crypto quotes
       const params: any = {
         symbols: symbol,
         start: start,
@@ -277,9 +284,7 @@ export class AlpacaClient implements AlpacaClientInterface {
   
   // Price history methods using direct API calls
   async getStockBars(symbol: string, timeframe: string, start: string, end?: string, limit?: number): Promise<any> {
-    this.ensureClient();
     try {
-      // Use direct API call for stock bars
       const params: any = {
         symbols: symbol,
         timeframe: timeframe,

@@ -141,27 +141,47 @@ export class AlpacaController {
         // Fetch initial data for all symbols
         for (const symbol of data.symbols) {
           try {
-            // Get latest bar, quote, and asset info
-            const [barData, quoteData, assetData] = await Promise.all([
-              this.alpacaClient.getStocksBarsLatest([symbol]),
-              this.alpacaClient.getStocksQuotesLatest([symbol]),
-              this.alpacaClient.getAsset(symbol)
-            ]);
+            const isCrypto = symbol.includes('/');
+            let marketData;
             
-            // Combine the data
-            const marketData = {
-              symbol,
-              bar: barData[symbol] || null,
-              quote: quoteData[symbol] || null,
-              asset: assetData || null,
-              timestamp: new Date().toISOString()
-            };
+            if (isCrypto) {
+              // Handle crypto symbols
+              const snapshots = await this.alpacaClient.getCryptoSnapshots([symbol]);
+              marketData = {
+                symbol,
+                bar: snapshots.snapshots?.[symbol]?.latestBar || null,
+                quote: snapshots.snapshots?.[symbol]?.latestQuote || null,
+                asset: null,
+                isCrypto: true,
+                timestamp: new Date().toISOString()
+              };
+            } else {
+              // Handle stock symbols
+              const [barData, quoteData, assetData] = await Promise.all([
+                this.alpacaClient.getStocksBarsLatest([symbol]),
+                this.alpacaClient.getStocksQuotesLatest([symbol]),
+                this.alpacaClient.getAsset(symbol)
+              ]);
+              
+              marketData = {
+                symbol,
+                bar: barData.bars?.[symbol] || null,
+                quote: quoteData.quotes?.[symbol] || null,
+                asset: assetData || null,
+                isCrypto: false,
+                timestamp: new Date().toISOString()
+              };
+            }
             
             // Send initial market data to the client
             ws.send(JSON.stringify({
               type: 'market_data',
               payload: marketData
             }));
+            
+            // Start live price updates for this symbol
+            this.startLivePriceUpdates(symbol, ws);
+            
           } catch (error) {
             console.error(`Error fetching initial market data for ${symbol}:`, error);
           }
@@ -182,6 +202,65 @@ export class AlpacaController {
         message: error instanceof Error ? error.message : 'Failed to process subscription'
       }));
     }
+  }
+
+  /**
+   * Start live price updates for a symbol
+   */
+  private startLivePriceUpdates(symbol: string, ws: WebSocket): void {
+    // Check if client is still subscribed to this symbol
+    const isSubscribed = () => {
+      const subscribed = (ws as any).subscribed;
+      return subscribed && subscribed.symbols && subscribed.symbols.includes(symbol);
+    };
+
+    // Set up periodic price updates (every 5 seconds)
+    const updateInterval = setInterval(async () => {
+      if (!isSubscribed() || ws.readyState !== WebSocket.OPEN) {
+        clearInterval(updateInterval);
+        return;
+      }
+
+      try {
+        const isCrypto = symbol.includes('/');
+        let marketData;
+
+        if (isCrypto) {
+          const snapshots = await this.alpacaClient.getCryptoSnapshots([symbol]);
+          marketData = {
+            symbol,
+            bar: snapshots.snapshots?.[symbol]?.latestBar || null,
+            quote: snapshots.snapshots?.[symbol]?.latestQuote || null,
+            asset: null,
+            isCrypto: true,
+            timestamp: new Date().toISOString()
+          };
+        } else {
+          const [barData, quoteData] = await Promise.all([
+            this.alpacaClient.getStocksBarsLatest([symbol]),
+            this.alpacaClient.getStocksQuotesLatest([symbol])
+          ]);
+          
+          marketData = {
+            symbol,
+            bar: barData.bars?.[symbol] || null,
+            quote: quoteData.quotes?.[symbol] || null,
+            asset: null,
+            isCrypto: false,
+            timestamp: new Date().toISOString()
+          };
+        }
+
+        // Send updated market data
+        ws.send(JSON.stringify({
+          type: 'market_data_update',
+          payload: marketData
+        }));
+
+      } catch (error) {
+        console.error(`Error updating live price for ${symbol}:`, error);
+      }
+    }, 5000); // Update every 5 seconds
   }
 
   /**
@@ -372,61 +451,46 @@ export class AlpacaController {
       const isCrypto = symbol.includes('/');
       
       try {
-        let barData, quoteData, assetData;
+        let marketData;
         
         if (isCrypto) {
-          // For crypto symbols, use crypto-specific methods
-          [barData] = await Promise.all([
-            this.alpacaClient.getCryptoBarsLatest([symbol]).catch(err => {
-              console.log(`Error fetching crypto bars for ${symbol}:`, err.message);
-              return { snapshots: {} };
-            })
-          ]);
+          // For crypto symbols, use crypto snapshots
+          const snapshots = await this.alpacaClient.getCryptoSnapshots([symbol]);
           
-          // Format the crypto data to match the expected structure
-          const formattedBarData: any = {};
-          if (barData.snapshots && barData.snapshots[symbol]) {
-            const snapshot = barData.snapshots[symbol];
-            formattedBarData[symbol] = {
-              t: snapshot.updated_at,
-              o: snapshot.bar?.o || 0,
-              h: snapshot.bar?.h || 0,
-              l: snapshot.bar?.l || 0,
-              c: snapshot.bar?.c || 0,
-              v: snapshot.bar?.v || 0
-            };
-          }
-          
-          barData = formattedBarData;
-          quoteData = {}; // Crypto quotes not supported in the same way as stocks
-          assetData = null; // No asset info for crypto
+          marketData = {
+            symbol,
+            bar: snapshots.snapshots?.[symbol]?.latestBar || null,
+            quote: snapshots.snapshots?.[symbol]?.latestQuote || null,
+            asset: null,
+            isCrypto: true,
+            timestamp: new Date().toISOString()
+          };
         } else {
           // For stock symbols, use stock-specific methods
-          [barData, quoteData, assetData] = await Promise.all([
+          const [barData, quoteData, assetData] = await Promise.all([
             this.alpacaClient.getStocksBarsLatest([symbol]).catch(err => {
               console.log(`Error fetching stock bars for ${symbol}:`, err.message);
-              return {};
+              return { bars: {} };
             }),
             this.alpacaClient.getStocksQuotesLatest([symbol]).catch(err => {
               console.log(`Error fetching stock quotes for ${symbol}:`, err.message);
-              return {};
+              return { quotes: {} };
             }),
             this.alpacaClient.getAsset(symbol).catch(err => {
               console.log(`Error fetching asset for ${symbol}:`, err.message);
               return null;
             })
           ]);
+          
+          marketData = {
+            symbol,
+            bar: barData.bars?.[symbol] || null,
+            quote: quoteData.quotes?.[symbol] || null,
+            asset: assetData || null,
+            isCrypto: false,
+            timestamp: new Date().toISOString()
+          };
         }
-      
-        // Combine the data
-        const marketData = {
-          symbol,
-          bar: barData[symbol] || null,
-          quote: quoteData[symbol] || null,
-          asset: assetData || null,
-          isCrypto,
-          timestamp: new Date().toISOString()
-        };
       
         // Broadcast market data via WebSocket if available
         if (global.wss) {
@@ -508,7 +572,7 @@ export class AlpacaController {
           // Format the response to be consistent
           barsData = {
             symbol,
-            bars: cryptoData.bars?.[symbol] || [],
+            bars: cryptoData.bars || {},
             timeframe: timeframe as string,
             currency: 'USD',
             exchange: 'CRYPTO'
@@ -526,7 +590,7 @@ export class AlpacaController {
           // Format the response to be consistent
           barsData = {
             symbol,
-            bars: stockData.bars?.[symbol] || [],
+            bars: stockData.bars || {},
             timeframe: timeframe as string,
             currency: 'USD',
             exchange: 'US'
@@ -538,7 +602,7 @@ export class AlpacaController {
           data: {
             symbol,
             timeframe,
-            bars: barsData,
+            bars: barsData.bars,
             isCrypto
           }
         });
