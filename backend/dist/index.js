@@ -1,4 +1,3 @@
-"use strict";
 /**
  * index.ts
  *
@@ -11,98 +10,161 @@
  * - Configure API routes
  * - Start the server
  * - Initialize the artificial order monitoring system
+ * - Set up WebSocket server with global reference
  */
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-const express_1 = __importDefault(require("express"));
-const cors_1 = __importDefault(require("cors"));
-const helmet_1 = __importDefault(require("helmet"));
-const promises_1 = __importDefault(require("fs/promises"));
-const path_1 = __importDefault(require("path"));
-const core_1 = require("./core");
-const routes_1 = require("./api/routes");
-const alpaca_client_1 = require("./services/alpaca-client");
-const websocket_server_1 = require("./services/websocket-server");
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import { ConfigManager, ArtificialOrderManager } from './core/index.js';
+import { setupApiRoutes } from './api/routes.js';
+import { createAlpacaClient } from './services/alpaca-client.js';
+import { setupWebSocketServer } from './services/websocket-server.js';
+import path from 'path';
+// Use the current working directory for config path
+const currentDir = process.cwd();
 // Initialize configuration manager
-const configPath = path_1.default.resolve(process.cwd(), 'config/config.json');
-console.log(`Initializing configuration manager with path: ${configPath}`);
-const configManager = new core_1.ConfigManager(configPath);
+const configPath = path.join(currentDir, 'config', 'config.json');
+console.log(`Config path: ${configPath}`);
+const configManager = new ConfigManager(configPath);
 // Initialize Express app
-const app = (0, express_1.default)();
+const app = express();
 // Apply middleware
-app.use((0, helmet_1.default)());
-app.use((0, cors_1.default)());
-app.use(express_1.default.json());
+app.use(helmet({
+    crossOriginEmbedderPolicy: false, // Allow WebSocket connections
+}));
+app.use(cors({
+    origin: ['http://localhost:3000', 'http://localhost:5173'], // Common dev ports
+    credentials: true
+}));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Add request logging
+app.use((req, res, next) => {
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+    next();
+});
 // Load configuration
 async function initializeServer() {
-    let config;
     try {
         console.log('Starting server initialization...');
-        // Verify config file exists and is readable
+        // Check if config file exists
         try {
-            await promises_1.default.access(configPath);
+            const fs = await import('fs/promises');
+            await fs.access(configPath);
             console.log('Config file exists and is accessible');
-            const configContent = await promises_1.default.readFile(configPath, 'utf-8');
-            console.log('Config file content:', configContent);
-            // Load and validate configuration
-            config = await configManager.loadConfig();
-            console.log('Configuration loaded successfully');
         }
         catch (error) {
-            console.error('Error accessing or reading config file:', error);
-            throw new Error(`Failed to load configuration: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            console.error('Config file not found, creating default config...');
+            await configManager.createDefaultConfig();
         }
+        // Load configuration
+        const config = await configManager.loadConfig();
+        console.log('Configuration loaded successfully');
+        console.log('API Port:', config.startup.apiPort);
+        console.log('Paper Trading:', config.runtime.alpaca.isPaper);
         // Initialize Alpaca client
-        const alpacaClient = (0, alpaca_client_1.createAlpacaClient)(config.runtime.alpaca);
+        console.log('Initializing Alpaca client...');
+        const alpacaClient = await createAlpacaClient(config.runtime.alpaca);
         console.log('Alpaca client initialized');
         // Initialize artificial order manager
-        const orderManager = new core_1.ArtificialOrderManager(config.runtime.monitoring.priceCheckIntervalMs);
+        const orderManager = new ArtificialOrderManager(config.runtime.monitoring.priceCheckIntervalMs);
         console.log('Artificial order manager initialized');
         // Set up API routes
-        (0, routes_1.setupApiRoutes)(app, configManager, alpacaClient, orderManager);
+        setupApiRoutes(app, configManager, alpacaClient, orderManager);
         console.log('API routes configured');
+        // Add a root route
+        app.get('/', (req, res) => {
+            res.json({
+                service: 'Alpaca API Service',
+                status: 'running',
+                version: '1.0.0',
+                timestamp: new Date().toISOString(),
+                endpoints: {
+                    health: '/api/health',
+                    config: '/api/config',
+                    account: '/api/account',
+                    orders: '/api/orders',
+                    positions: '/api/positions',
+                    market: '/api/market',
+                    alpaca: '/api/alpaca',
+                    'artificial-orders': '/api/artificial-orders'
+                }
+            });
+        });
         // Start the API server
         const apiPort = config.startup.apiPort;
-        const apiServer = app.listen(apiPort, () => {
-            console.log(`API server listening on port ${apiPort}`);
+        const apiServer = app.listen(apiPort, '0.0.0.0', () => {
+            console.log(`🚀 API server listening on http://localhost:${apiPort}`);
+            console.log(`📊 WebSocket server will be available on ws://localhost:${apiPort}`);
         });
         // Set up WebSocket server for real-time updates
-        const wsServer = (0, websocket_server_1.setupWebSocketServer)(apiServer, alpacaClient, orderManager);
-        console.log('WebSocket server initialized');
+        const wsServer = setupWebSocketServer(apiServer, alpacaClient, orderManager);
+        console.log('✅ WebSocket server initialized');
+        // WebSocketServer constructor already sets global.wss
+        // Log successful startup
+        console.log('\n🎉 Server initialization completed successfully!');
+        console.log(`📡 API Base URL: http://localhost:${apiPort}`);
+        console.log(`🔄 WebSocket URL: ws://localhost:${apiPort}`);
+        console.log('\n📋 Available endpoints:');
+        console.log(`   GET  /                          - Service info`);
+        console.log(`   GET  /api/health                - Health check`);
+        console.log(`   GET  /api/alpaca/market-data/:symbol - Market data`);
+        console.log(`   GET  /api/alpaca/price-history/:symbol - Price history`);
+        console.log(`   POST /api/alpaca/connect        - Connect to Alpaca`);
+        console.log(`   WS   ws://localhost:${apiPort}     - WebSocket endpoint`);
         // Handle graceful shutdown
         process.on('SIGINT', () => gracefulShutdown(apiServer, wsServer, orderManager));
         process.on('SIGTERM', () => gracefulShutdown(apiServer, wsServer, orderManager));
+        // Handle uncaught exceptions
+        process.on('uncaughtException', (error) => {
+            console.error('❌ Uncaught Exception:', error);
+            gracefulShutdown(apiServer, wsServer, orderManager);
+        });
+        process.on('unhandledRejection', (reason, promise) => {
+            console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+            gracefulShutdown(apiServer, wsServer, orderManager);
+        });
     }
     catch (error) {
-        console.error('Failed to initialize server:', error);
+        console.error('❌ Failed to initialize server:', error);
+        // More detailed error logging
+        if (error instanceof Error) {
+            console.error('Error name:', error.name);
+            console.error('Error message:', error.message);
+            console.error('Error stack:', error.stack);
+        }
         process.exit(1);
     }
 }
 // Graceful shutdown function
 function gracefulShutdown(apiServer, wsServer, orderManager) {
-    console.log('Shutting down gracefully...');
+    console.log('\n🛑 Shutting down gracefully...');
     // Stop the artificial order monitoring
     orderManager.stopMonitoring();
-    console.log('Artificial order monitoring stopped');
+    console.log('✅ Artificial order monitoring stopped');
     // Close the WebSocket server
-    wsServer.close(() => {
-        console.log('WebSocket server closed');
-        // Close the API server
-        apiServer.close(() => {
-            console.log('API server closed');
-            process.exit(0);
-        });
+    if (wsServer && typeof wsServer.close === 'function') {
+        wsServer.close();
+        console.log('✅ WebSocket server closed');
+    }
+    // Close the API server
+    apiServer.close(() => {
+        console.log('✅ API server closed');
+        console.log('👋 Goodbye!');
+        process.exit(0);
     });
-    // Force exit after 5 seconds if graceful shutdown fails
+    // Force exit after 10 seconds if graceful shutdown fails
     setTimeout(() => {
-        console.error('Forced shutdown after timeout');
+        console.error('⚠️  Forced shutdown after timeout');
         process.exit(1);
-    }, 5000);
+    }, 10000);
 }
 // Start the server
+console.log('🚀 Starting Alpaca API Service...');
+console.log(`📅 ${new Date().toISOString()}`);
+console.log(`📂 Working directory: ${process.cwd()}`);
+console.log(`🔧 Node version: ${process.version}`);
 initializeServer().catch(error => {
-    console.error('Initialization error:', error);
+    console.error('💥 Fatal initialization error:', error);
     process.exit(1);
 });

@@ -5,7 +5,7 @@
  * Fixed to handle crypto and stock data correctly with proper API endpoints
  */
 
-import { AlpacaConfig } from '../core';
+import { AlpacaConfig } from '../core/index.js';
 import axios from 'axios';
 
 // Dynamic import to handle ES module

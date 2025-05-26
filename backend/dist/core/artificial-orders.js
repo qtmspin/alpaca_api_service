@@ -1,197 +1,254 @@
-"use strict";
 /**
  * artificial-orders.ts
  *
- * This file contains the implementation for handling artificial stop and stop-limit orders
- * during pre-market and post-market hours when these order types aren't supported by the exchange.
+ * This file manages artificial orders that are triggered by market conditions.
  * Location: backend/src/core/artificial-orders.ts
  *
  * Responsibilities:
- * - Store and manage artificial orders
- * - Monitor prices and execute orders when trigger conditions are met
- * - Provide methods to create, cancel, and query artificial orders
+ * - Manage artificial orders that aren't sent to the broker immediately
+ * - Monitor market conditions and trigger orders when conditions are met
+ * - Provide a system for conditional order execution
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.ArtificialOrderManager = void 0;
-const uuid_1 = require("uuid");
-const schemas_1 = require("./schemas");
-/**
- * ArtificialOrderManager class
- *
- * Manages artificial stop and stop-limit orders during pre-market and post-market hours.
- * Monitors prices and executes orders when trigger conditions are met.
- */
-class ArtificialOrderManager {
-    /**
-     * Constructor for ArtificialOrderManager
-     * @param intervalMs - Interval in milliseconds for price checking (default: 1000ms)
-     */
-    constructor(intervalMs = 1000) {
+import { EventEmitter } from 'events';
+import { v4 as uuidv4 } from 'uuid';
+// Utility function to check if an artificial order can be executed
+export function canExecuteArtificialOrder(order, marketData) {
+    if (!order.trigger_condition) {
+        return true;
+    }
+    const { field, operator, value } = order.trigger_condition;
+    const marketValue = field === 'price' ? marketData.price : (marketData.volume || 0);
+    switch (operator) {
+        case 'gte':
+            return marketValue >= value;
+        case 'lte':
+            return marketValue <= value;
+        case 'eq':
+            return marketValue === value;
+        default:
+            return false;
+    }
+}
+export class ArtificialOrderManager extends EventEmitter {
+    constructor(priceCheckIntervalMs = 5000) {
+        super();
         this.orders = new Map();
-        this.priceMonitorInterval = null;
-        this.intervalMs = intervalMs;
-    }
-    /**
-     * Start the price monitoring service
-     * @param priceProvider - Function that returns the latest price for a symbol
-     * @param orderExecutor - Function that executes an order when triggered
-     */
-    startMonitoring(priceProvider, orderExecutor) {
-        if (this.priceMonitorInterval) {
-            clearInterval(this.priceMonitorInterval);
-        }
-        this.priceMonitorInterval = setInterval(async () => {
-            const pendingOrders = Array.from(this.orders.values())
-                .filter(order => order.status === 'pending');
-            if (pendingOrders.length === 0)
-                return;
-            // Group orders by symbol to minimize API calls
-            const symbolGroups = pendingOrders.reduce((groups, order) => {
-                if (!groups[order.symbol]) {
-                    groups[order.symbol] = [];
-                }
-                groups[order.symbol].push(order);
-                return groups;
-            }, {});
-            // Check each symbol's price once and evaluate all orders for that symbol
-            for (const [symbol, orders] of Object.entries(symbolGroups)) {
-                try {
-                    const currentPrice = await priceProvider(symbol);
-                    for (const order of orders) {
-                        if (this.shouldTriggerOrder(order, currentPrice)) {
-                            order.status = 'triggered';
-                            order.updatedAt = new Date().toISOString();
-                            try {
-                                const executedOrderId = await orderExecutor(order);
-                                order.status = 'filled';
-                                order.executedOrderId = executedOrderId;
-                                order.updatedAt = new Date().toISOString();
-                                this.orders.set(order.id, order);
-                            }
-                            catch (error) {
-                                console.error(`Failed to execute artificial order ${order.id}:`, error);
-                                // Reset to pending if execution fails, will retry on next interval
-                                order.status = 'pending';
-                                order.updatedAt = new Date().toISOString();
-                                this.orders.set(order.id, order);
-                            }
-                        }
-                    }
-                }
-                catch (error) {
-                    console.error(`Failed to get price for ${symbol}:`, error);
-                }
-            }
-        }, this.intervalMs);
-    }
-    /**
-     * Stop the price monitoring service
-     */
-    stopMonitoring() {
-        if (this.priceMonitorInterval) {
-            clearInterval(this.priceMonitorInterval);
-            this.priceMonitorInterval = null;
-        }
+        this.monitoringInterval = null;
+        this.priceCheckIntervalMs = priceCheckIntervalMs;
     }
     /**
      * Create a new artificial order
-     * @param orderRequest - The artificial order request
-     * @returns The created artificial order
      */
-    createOrder(orderRequest) {
-        const now = new Date().toISOString();
-        const isStopLimit = !!orderRequest.limitPrice;
+    createOrder(request) {
+        // Ensure time_in_force is restricted to 'day' or 'gtc'
+        const timeInForce = request.time_in_force === 'day' || request.time_in_force === 'gtc'
+            ? request.time_in_force
+            : 'day'; // Default to 'day' if an unsupported value is provided
         const order = {
-            ...orderRequest,
-            id: (0, uuid_1.v4)(),
+            id: uuidv4(),
+            symbol: request.symbol,
+            qty: request.qty,
+            side: request.side,
+            type: request.type,
+            limit_price: request.limit_price,
+            stop_price: request.stop_price,
+            time_in_force: timeInForce, // Use the validated value
             status: 'pending',
-            createdAt: now,
-            updatedAt: now,
-            isStopLimit
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            trigger_condition: request.trigger_condition
         };
         this.orders.set(order.id, order);
+        // Emit event for order creation
+        this.emit('orderCreated', order);
         return order;
     }
     /**
-     * Cancel an artificial order
-     * @param orderId - The ID of the order to cancel
-     * @returns The canceled order or null if not found
+     * Get an artificial order by ID
      */
-    cancelOrder(orderId) {
-        const order = this.orders.get(orderId);
-        if (order && order.status === 'pending') {
-            order.status = 'canceled';
-            order.updatedAt = new Date().toISOString();
-            this.orders.set(orderId, order);
-            return order;
-        }
-        return order || null;
+    getOrder(orderId) {
+        return this.orders.get(orderId);
     }
     /**
      * Get all artificial orders
-     * @param status - Optional filter by status
-     * @returns Array of artificial orders
      */
-    getOrders(status) {
-        const orders = Array.from(this.orders.values());
-        if (status) {
-            return orders.filter(order => order.status === status);
+    getAllOrders() {
+        return Array.from(this.orders.values());
+    }
+    /**
+     * Get orders by status
+     */
+    getOrdersByStatus(status) {
+        return this.getAllOrders().filter(order => order.status === status);
+    }
+    /**
+     * Get orders by symbol
+     */
+    getOrdersBySymbol(symbol) {
+        return this.getAllOrders().filter(order => order.symbol === symbol);
+    }
+    /**
+     * Update an artificial order
+     */
+    updateOrder(orderId, updates) {
+        const order = this.orders.get(orderId);
+        if (!order) {
+            return null;
         }
-        return orders;
+        const updatedOrder = {
+            ...order,
+            ...updates,
+            updated_at: new Date().toISOString()
+        };
+        this.orders.set(orderId, updatedOrder);
+        // Emit event for order update
+        this.emit('orderUpdated', updatedOrder, order);
+        return updatedOrder;
     }
     /**
-     * Get a specific artificial order by ID
-     * @param orderId - The ID of the order to retrieve
-     * @returns The order or null if not found
+     * Cancel an artificial order
      */
-    getOrder(orderId) {
-        return this.orders.get(orderId) || null;
-    }
-    /**
-     * Determine if an order should be triggered based on current price
-     * @param order - The artificial order to check
-     * @param currentPrice - The current price of the symbol
-     * @returns True if the order should be triggered
-     */
-    shouldTriggerOrder(order, currentPrice) {
-        if (order.side === 'buy') {
-            // For buy stop orders, trigger when price rises above trigger price
-            return currentPrice >= order.triggerPrice;
+    cancelOrder(orderId) {
+        const order = this.orders.get(orderId);
+        if (!order || order.status !== 'pending') {
+            return false;
         }
-        else {
-            // For sell stop orders, trigger when price falls below trigger price
-            return currentPrice <= order.triggerPrice;
+        const cancelledOrder = this.updateOrder(orderId, { status: 'cancelled' });
+        if (cancelledOrder) {
+            this.emit('orderCancelled', cancelledOrder);
+            return true;
+        }
+        return false;
+    }
+    /**
+     * Remove an artificial order
+     */
+    removeOrder(orderId) {
+        const order = this.orders.get(orderId);
+        if (!order) {
+            return false;
+        }
+        this.orders.delete(orderId);
+        this.emit('orderRemoved', order);
+        return true;
+    }
+    /**
+     * Check if an order should be triggered based on market data
+     */
+    checkOrderTrigger(order, marketData) {
+        if (!order.trigger_condition) {
+            // No trigger condition means order should be executed immediately
+            return true;
+        }
+        const { field, operator, value } = order.trigger_condition;
+        const marketValue = field === 'price' ? marketData.price : (marketData.volume || 0);
+        switch (operator) {
+            case 'gte':
+                return marketValue >= value;
+            case 'lte':
+                return marketValue <= value;
+            case 'eq':
+                return marketValue === value;
+            default:
+                return false;
         }
     }
     /**
-     * Check if artificial orders should be used based on market hours
-     * @returns True if artificial orders should be used
+     * Process market data and trigger orders if conditions are met
      */
-    static shouldUseArtificialOrders() {
-        const now = new Date();
-        return (0, schemas_1.isPreMarketHours)(now) || (0, schemas_1.isPostMarketHours)(now);
-    }
-    /**
-     * Clean up expired orders (for day orders)
-     */
-    cleanupExpiredOrders() {
-        const now = new Date();
-        const isMarketOpen = !(0, schemas_1.isPreMarketHours)(now) && !(0, schemas_1.isPostMarketHours)(now);
-        // Only expire day orders when market is closed for the day
-        if (!isMarketOpen)
-            return;
-        for (const order of this.orders.values()) {
-            if (order.status === 'pending' && order.timeInForce === 'day') {
-                // Check if the order was created on a previous day
-                const orderDate = new Date(order.createdAt).setHours(0, 0, 0, 0);
-                const today = now.setHours(0, 0, 0, 0);
-                if (orderDate < today) {
-                    order.status = 'expired';
-                    order.updatedAt = now.toISOString();
-                    this.orders.set(order.id, order);
+    processMarketData(symbol, marketData) {
+        const triggeredOrders = [];
+        const pendingOrders = this.getOrdersBySymbol(symbol).filter(order => order.status === 'pending');
+        for (const order of pendingOrders) {
+            if (this.checkOrderTrigger(order, marketData)) {
+                const triggeredOrder = this.updateOrder(order.id, { status: 'filled' });
+                if (triggeredOrder) {
+                    triggeredOrders.push(triggeredOrder);
+                    this.emit('orderTriggered', triggeredOrder, marketData);
                 }
             }
         }
+        return triggeredOrders;
+    }
+    /**
+     * Start monitoring for order triggers
+     */
+    startMonitoring() {
+        if (this.monitoringInterval) {
+            return; // Already monitoring
+        }
+        this.monitoringInterval = setInterval(() => {
+            // This would typically fetch market data and check triggers
+            // For now, we'll just emit a monitoring event
+            this.emit('monitoring', {
+                timestamp: new Date().toISOString(),
+                pendingOrders: this.getOrdersByStatus('pending').length
+            });
+        }, this.priceCheckIntervalMs);
+        this.emit('monitoringStarted');
+    }
+    /**
+     * Stop monitoring for order triggers
+     */
+    stopMonitoring() {
+        if (this.monitoringInterval) {
+            clearInterval(this.monitoringInterval);
+            this.monitoringInterval = null;
+            this.emit('monitoringStopped');
+        }
+    }
+    /**
+     * Check if monitoring is active
+     */
+    isMonitoring() {
+        return this.monitoringInterval !== null;
+    }
+    /**
+     * Clean up expired orders
+     */
+    cleanupExpiredOrders() {
+        const now = new Date();
+        const expiredOrders = [];
+        for (const order of this.orders.values()) {
+            if (order.status === 'pending' && order.time_in_force === 'day') {
+                // Check if order was created today and market is closed
+                const createdAt = new Date(order.created_at);
+                const isExpired = now.getDate() !== createdAt.getDate() ||
+                    now.getMonth() !== createdAt.getMonth() ||
+                    now.getFullYear() !== createdAt.getFullYear();
+                if (isExpired) {
+                    expiredOrders.push(order);
+                }
+            }
+        }
+        // Mark expired orders
+        for (const order of expiredOrders) {
+            this.updateOrder(order.id, { status: 'expired' });
+        }
+        return expiredOrders.length;
+    }
+    /**
+     * Get statistics about artificial orders
+     */
+    getStatistics() {
+        const orders = this.getAllOrders();
+        const byStatus = {};
+        const bySymbol = {};
+        for (const order of orders) {
+            byStatus[order.status] = (byStatus[order.status] || 0) + 1;
+            bySymbol[order.symbol] = (bySymbol[order.symbol] || 0) + 1;
+        }
+        return {
+            total: orders.length,
+            byStatus,
+            bySymbol
+        };
+    }
+    /**
+     * Clear all orders (useful for testing)
+     */
+    clearAllOrders() {
+        this.orders.clear();
+        this.emit('allOrdersCleared');
     }
 }
-exports.ArtificialOrderManager = ArtificialOrderManager;

@@ -45,6 +45,10 @@ export interface MonitoringConfig {
 export interface RuntimeConfig {
   alpaca: AlpacaConfig;
   monitoring: MonitoringConfig;
+  rateLimits: {
+    orders: number;
+    data: number;
+  };
 }
 
 // Startup configuration
@@ -82,7 +86,14 @@ export const MonitoringConfigSchema = z.object({
 
 export const RuntimeConfigSchema = z.object({
   alpaca: AlpacaConfigSchema,
-  monitoring: MonitoringConfigSchema
+  monitoring: MonitoringConfigSchema,
+  rateLimits: z.object({
+    orders: z.number().min(1).default(200),
+    data: z.number().min(1).default(500)
+  }).default({
+    orders: 200,
+    data: 500
+  })
 });
 
 export const StartupConfigSchema = z.object({
@@ -223,6 +234,74 @@ export interface ValidationError extends AppError {
   field: string;
   value: any;
 }
+
+// Configuration update schema
+export const ConfigUpdateSchema = z.object({
+  alpaca: AlpacaConfigSchema.partial().optional(),
+  monitoring: MonitoringConfigSchema.partial().optional(),
+  rateLimits: z.object({
+    orders: z.number().min(1).optional(),
+    data: z.number().min(1).optional()
+  }).partial().optional()
+});
+
+// Artificial order schemas
+export const TriggerConditionSchema = z.object({
+  field: z.enum(['price', 'volume']),
+  operator: z.enum(['gte', 'lte', 'eq']),
+  value: z.number().positive()
+});
+
+export const ArtificialOrderRequestSchema = z.object({
+  symbol: z.string().min(1).max(10),
+  qty: z.number().positive(),
+  side: z.enum(['buy', 'sell']),
+  type: z.enum(['market', 'limit', 'stop', 'stop_limit']),
+  limit_price: z.number().positive().optional(),
+  stop_price: z.number().positive().optional(),
+  time_in_force: z.enum(['day', 'gtc']),
+  trigger_condition: TriggerConditionSchema.optional()
+});
+
+// Market hours utility functions
+export function isPreMarketHours(): boolean {
+  const now = new Date();
+  const marketOpenTime = new Date(now);
+  const [hours, minutes] = MARKET_HOURS.OPEN.split(':').map(Number);
+  marketOpenTime.setHours(hours, minutes, 0, 0);
+  
+  // Pre-market is 4:00 AM to market open
+  const preMarketStart = new Date(now);
+  preMarketStart.setHours(4, 0, 0, 0);
+  
+  return now >= preMarketStart && now < marketOpenTime;
+}
+
+export function isPostMarketHours(): boolean {
+  const now = new Date();
+  const marketCloseTime = new Date(now);
+  const [hours, minutes] = MARKET_HOURS.CLOSE.split(':').map(Number);
+  marketCloseTime.setHours(hours, minutes, 0, 0);
+  
+  // Post-market is market close to 8:00 PM
+  const postMarketEnd = new Date(now);
+  postMarketEnd.setHours(20, 0, 0, 0);
+  
+  return now > marketCloseTime && now <= postMarketEnd;
+}
+
+// Order request schema
+export const OrderRequestSchema = z.object({
+  symbol: z.string().min(1).max(10),
+  qty: z.number().positive(),
+  side: z.enum(['buy', 'sell']),
+  type: z.enum(['market', 'limit', 'stop', 'stop_limit']),
+  time_in_force: z.enum(['day', 'gtc', 'opg', 'cls', 'ioc', 'fok']),
+  limit_price: z.number().positive().optional(),
+  stop_price: z.number().positive().optional(),
+  extended_hours: z.boolean().optional(),
+  client_order_id: z.string().optional()
+});
 
 // Export commonly used types
 export type OrderSide = 'buy' | 'sell';

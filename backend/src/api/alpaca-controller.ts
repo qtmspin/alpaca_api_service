@@ -5,13 +5,13 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { AlpacaClient } from '../services/alpaca-client';
-import { createServerError } from '../core/errors';
+import { AlpacaClient } from '../services/alpaca-client.js';
+import { createServerError } from '../core/errors.js';
 import WebSocket from 'ws';
 
 // Declare global WebSocket server
 declare global {
-  var wss: WebSocket.Server | undefined;
+  var wss: any | undefined;
 }
 
 /**
@@ -44,6 +44,8 @@ export class AlpacaController {
     this.router.get('/assets', this.getAssets.bind(this));
     this.router.get('/market-data/:symbol', this.getMarketData.bind(this));
     this.router.get('/price-history/:symbol', this.getPriceHistory.bind(this));
+    // Add a specific route for crypto price history to handle symbols with slashes
+    this.router.get('/crypto-price-history/:base/:quote', this.getCryptoPriceHistory.bind(this));
     
     // Initialize WebSocket handlers if WebSocket server is available
     if (global.wss) {
@@ -287,7 +289,7 @@ export class AlpacaController {
           }
         };
         
-        global.wss.clients.forEach(client => {
+        global.wss.clients.forEach((client: any) => {
           if (client.readyState === WebSocket.OPEN) {
             client.send(JSON.stringify(statusUpdate));
           }
@@ -315,7 +317,7 @@ export class AlpacaController {
           }
         };
         
-        global.wss.clients.forEach(client => {
+        global.wss.clients.forEach((client: any) => {
           if (client.readyState === WebSocket.OPEN) {
             client.send(JSON.stringify(statusUpdate));
           }
@@ -499,7 +501,7 @@ export class AlpacaController {
             payload: marketData
           };
           
-          global.wss.clients.forEach(client => {
+          global.wss.clients.forEach((client: any) => {
             if (client.readyState === WebSocket.OPEN) {
               client.send(JSON.stringify(marketDataUpdate));
             }
@@ -522,6 +524,75 @@ export class AlpacaController {
       res.status(500).json({
         success: false,
         message: error instanceof Error ? error.message : 'Failed to get market data'
+      });
+    }
+  }
+
+  /**
+   * Get price history for a symbol
+   * @param req Request object
+   * @param res Response object
+   */
+  /**
+   * Handle price history for crypto symbols with slashes (e.g., BTC/USD)
+   * @param req Request object
+   * @param res Response object
+   */
+  private async getCryptoPriceHistory(req: Request, res: Response): Promise<void> {
+    try {
+      this.alpacaClient.ensureClient();
+      const { base, quote } = req.params;
+      const symbol = `${base}/${quote}`;
+      const { timeframe = '1Day', start, end, limit = 100 } = req.query;
+      
+      if (!start) {
+        res.status(400).json({
+          success: false,
+          message: 'Start date is required'
+        });
+        return;
+      }
+      
+      try {
+        // For crypto symbols
+        const cryptoData = await this.alpacaClient.getCryptoBars(
+          symbol,
+          timeframe as string,
+          start as string,
+          end as string | undefined,
+          limit ? parseInt(limit as string) : undefined
+        );
+        
+        // Format the response to be consistent
+        const barsData = {
+          symbol,
+          bars: cryptoData.bars || {},
+          timeframe: timeframe as string,
+          currency: 'USD',
+          exchange: 'CRYPTO'
+        };
+        
+        res.json({
+          success: true,
+          data: {
+            symbol,
+            timeframe,
+            bars: barsData.bars,
+            isCrypto: true
+          }
+        });
+      } catch (innerError) {
+        console.error(`Error processing crypto price history for ${symbol}:`, innerError);
+        res.status(500).json({
+          success: false,
+          message: `Error processing crypto price history: ${innerError instanceof Error ? innerError.message : 'Unknown error'}`
+        });
+      }
+    } catch (error) {
+      console.error(`Error getting crypto price history for ${req.params.base}/${req.params.quote}:`, error);
+      res.status(500).json({
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to get crypto price history'
       });
     }
   }

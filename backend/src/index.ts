@@ -16,17 +16,17 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import { ConfigManager, ArtificialOrderManager } from './core/index';
-import { setupApiRoutes } from './api/routes';
-import { createAlpacaClient } from './services/alpaca-client';
-import { setupWebSocketServer } from './services/websocket-server';
+import { ConfigManager, ArtificialOrderManager } from './core/index.js';
+import { setupApiRoutes } from './api/routes.js';
+import { createAlpacaClient } from './services/alpaca-client.js';
+import { setupWebSocketServer } from './services/websocket-server.js';
 import path from 'path';
 import { Server } from 'http';
 import WebSocket from 'ws';
 
 // Declare global WebSocket server
 declare global {
-  var wss: WebSocket.Server | undefined;
+  var wss: any | undefined;
 }
 
 // Use the current working directory for config path
@@ -206,7 +206,35 @@ console.log(`📅 ${new Date().toISOString()}`);
 console.log(`📂 Working directory: ${process.cwd()}`);
 console.log(`🔧 Node version: ${process.version}`);
 
-initializeServer().catch(error => {
-  console.error('💥 Fatal initialization error:', error);
-  process.exit(1);
+// Add a simple health check endpoint that doesn't require initialization
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString()
+  });
 });
+
+// Start listening on a basic port for health checks
+const healthCheckPort = 3456;
+const healthServer = app.listen(healthCheckPort, () => {
+  console.log(`Health check server running at http://localhost:${healthCheckPort}/health`);
+});
+
+// Initialize the main server
+initializeServer()
+  .then(() => {
+    console.log('Server initialization completed successfully!');
+  })
+  .catch(error => {
+    console.error('💥 Fatal initialization error:', error);
+    // Print more detailed error information
+    if (error instanceof Error) {
+      console.error('Error name:', error.name);
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+    } else {
+      console.error('Unknown error type:', typeof error);
+      console.error('Error value:', error);
+    }
+    process.exit(1);
+  });

@@ -11,15 +11,15 @@
  */
 
 import express, { Express } from 'express';
-import { ConfigController } from './config-controller';
-import { AccountController } from './account-controller';
-import { OrderController } from './order-controller';
-import { PositionController } from './position-controller';
-import { MarketDataController } from './market-data-controller';
-import { ArtificialOrdersController } from './artificial-orders-controller';
-import { AlpacaController } from './alpaca-controller';
-import { ConfigManager, ArtificialOrderManager } from '../core';
-import { AlpacaClient } from '../services/alpaca-client';
+import { ConfigController } from './config-controller.js';
+import { AccountController } from './account-controller.js';
+import { OrderController } from './order-controller.js';
+import { PositionController } from './position-controller.js';
+import { MarketDataController } from './market-data-controller.js';
+import { ArtificialOrdersController } from './artificial-orders-controller.js';
+import { AlpacaController } from './alpaca-controller.js';
+import { ConfigManager, ArtificialOrderManager } from '../core/index.js';
+import { AlpacaClient } from '../services/alpaca-client.js';
 
 /**
  * Set up all API routes

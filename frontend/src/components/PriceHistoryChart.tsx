@@ -72,13 +72,31 @@ const PriceHistoryChart: React.FC<PriceHistoryProps> = ({ symbol, onError, onLog
       
       addLog(`Fetching price history for ${symbol} with timeframe ${timeframe}`);
       
-      const response = await axios.get(`/api/alpaca/price-history/${symbol}`, {
-        params: {
-          timeframe,
-          start: startDate.toISOString(),
-          limit: 100
-        }
-      });
+      // Check if the symbol is a crypto symbol (contains '/')
+      const isCrypto = symbol.includes('/');
+      let response;
+      
+      if (isCrypto) {
+        // For crypto symbols, use the dedicated crypto endpoint
+        const [base, quote] = symbol.split('/');
+        response = await axios.get(`/api/alpaca/crypto-price-history/${base}/${quote}`, {
+          params: {
+            timeframe,
+            start: startDate.toISOString(),
+            limit: 100
+          }
+        });
+      } else {
+        // For stock symbols, use the regular endpoint
+        const encodedSymbol = encodeURIComponent(symbol);
+        response = await axios.get(`/api/alpaca/price-history/${encodedSymbol}`, {
+          params: {
+            timeframe,
+            start: startDate.toISOString(),
+            limit: 100
+          }
+        });
+      }
 
       if (response.data.success) {
         setPriceHistory(response.data.data);

@@ -48,7 +48,7 @@ Get current service configuration.
   "runtime": {
     "alpaca": {
       "apiKey": "PK***********",
-      "apiSecret": "**********",
+      "secretKey": "**********",
       "paperTrading": true
     },
     "rateLimits": {
@@ -106,7 +106,7 @@ Update service configuration.
   "runtime": {
     "alpaca": {
       "apiKey": "PK***********",
-      "apiSecret": "**********",
+      "secretKey": "**********",
       "paperTrading": true
     },
     "rateLimits": {

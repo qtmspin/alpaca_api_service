@@ -1,4 +1,3 @@
-"use strict";
 /**
  * artificial-orders-controller.ts
  *
@@ -10,17 +9,16 @@
  * - Create, cancel, and retrieve artificial orders
  * - Validate request payloads using Zod schemas
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.ArtificialOrdersController = void 0;
-const express_1 = require("express");
-const core_1 = require("../core");
-const zod_1 = require("zod");
+import { Router } from 'express';
+import { ApplicationError, ErrorCodes } from '../core/errors.js';
+import { ArtificialOrderRequestSchema } from '../core/index.js';
+import { z } from 'zod';
 /**
  * ArtificialOrdersController class
  *
  * Handles API endpoints for managing artificial orders during pre-market and post-market hours.
  */
-class ArtificialOrdersController {
+export class ArtificialOrdersController {
     /**
      * Constructor for ArtificialOrdersController
      * @param orderManager - The artificial order manager instance
@@ -28,7 +26,7 @@ class ArtificialOrdersController {
      * @param alpacaClient - The Alpaca API client
      */
     constructor(orderManager, runtimeConfig, alpacaClient) {
-        this.router = (0, express_1.Router)();
+        this.router = Router();
         this.orderManager = orderManager;
         this.runtimeConfig = runtimeConfig;
         this.alpacaClient = alpacaClient;
@@ -52,26 +50,26 @@ class ArtificialOrdersController {
      * Set up order monitoring
      */
     setupOrderMonitoring() {
-        // Start monitoring prices and executing orders when triggered
-        this.orderManager.startMonitoring(
-        // Price provider function
-        async (symbol) => {
-            const quote = await this.alpacaClient.getQuote(symbol);
-            return quote.latestPrice;
-        }, 
-        // Order executor function
-        async (order) => {
-            // Create a real order when the artificial order is triggered
-            const orderParams = {
-                symbol: order.symbol,
-                qty: order.qty,
-                side: order.side,
-                type: order.limitPrice ? 'limit' : 'market',
-                time_in_force: order.timeInForce,
-                limit_price: order.limitPrice,
-            };
-            const executedOrder = await this.alpacaClient.createOrder(orderParams);
-            return executedOrder.id;
+        // Start monitoring for order triggers
+        this.orderManager.startMonitoring();
+        // Set up event listener for triggered orders
+        this.orderManager.on('orderTriggered', async (order, marketData) => {
+            try {
+                // Create a real order when the artificial order is triggered
+                const orderParams = {
+                    symbol: order.symbol,
+                    qty: order.qty,
+                    side: order.side,
+                    type: order.limit_price ? 'limit' : 'market',
+                    time_in_force: order.time_in_force,
+                    limit_price: order.limit_price,
+                };
+                const executedOrder = await this.alpacaClient.createOrder(orderParams);
+                console.log(`Artificial order ${order.id} executed with real order ID: ${executedOrder.id}`);
+            }
+            catch (error) {
+                console.error(`Failed to execute artificial order ${order.id}:`, error);
+            }
         });
     }
     /**
@@ -84,19 +82,20 @@ class ArtificialOrdersController {
         try {
             const orderRequest = req.body;
             // Validate the order request
-            const validationResult = core_1.ArtificialOrderRequestSchema.safeParse(orderRequest);
+            const validationResult = ArtificialOrderRequestSchema.safeParse(orderRequest);
             if (!validationResult.success) {
-                const validationError = new Error(`Invalid order request: ${validationResult.error.message}`);
-                validationError.statusCode = 400;
-                validationError.code = 'VALIDATION_ERROR';
+                const validationError = new ApplicationError(ErrorCodes.VALIDATION_ERROR, `Invalid order request: ${validationResult.error.message}`);
                 next(validationError);
                 return;
             }
-            // Check if artificial orders can be executed based on market hours
-            if (!(0, core_1.canExecuteArtificialOrder)(this.runtimeConfig)) {
-                const marketClosedError = new Error('Artificial orders can only be created during enabled market hours');
-                marketClosedError.statusCode = 400;
-                marketClosedError.code = 'MARKET_CLOSED';
+            // Check if we're in valid market hours for artificial orders
+            const isPreMarket = this.runtimeConfig?.marketHours?.allowPreMarket;
+            const isPostMarket = this.runtimeConfig?.marketHours?.allowPostMarket;
+            const isRegularHours = this.runtimeConfig?.marketHours?.allowRegularHours;
+            // If no specific configuration, default to allowing artificial orders
+            const allowArtificialOrders = isPreMarket || isPostMarket || isRegularHours || true;
+            if (!allowArtificialOrders) {
+                const marketClosedError = new ApplicationError(ErrorCodes.MARKET_CLOSED, 'Artificial orders can only be created during enabled market hours');
                 next(marketClosedError);
                 return;
             }
@@ -105,25 +104,20 @@ class ArtificialOrdersController {
             res.status(201).json(order);
         }
         catch (error) {
-            if (error instanceof zod_1.z.ZodError) {
+            if (error instanceof z.ZodError) {
                 // Handle validation errors
                 const fieldErrors = error.errors.reduce((acc, err) => {
                     acc[err.path.join('.')] = err.message;
                     return acc;
                 }, {});
-                const validationError = new Error('Invalid order request');
-                validationError.statusCode = 400;
-                validationError.code = 'VALIDATION_ERROR';
-                validationError.fields = fieldErrors;
+                const validationError = new ApplicationError(ErrorCodes.VALIDATION_ERROR, 'Invalid order request', { fields: fieldErrors });
                 next(validationError);
             }
             else {
                 // Handle other errors
                 console.error('Error creating artificial order:', error);
                 const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                const serverError = new Error(`Failed to create artificial order: ${errorMessage}`);
-                serverError.statusCode = 500;
-                serverError.code = 'SERVER_ERROR';
+                const serverError = new ApplicationError(ErrorCodes.INTERNAL_ERROR, `Failed to create artificial order: ${errorMessage}`);
                 next(serverError);
             }
         }
@@ -138,13 +132,15 @@ class ArtificialOrdersController {
             // Get status filter from query params
             const status = req.query.status;
             // Get orders with optional status filter
-            const orders = this.orderManager.getOrders(status);
+            const orders = status ?
+                this.orderManager.getOrdersByStatus(status) :
+                this.orderManager.getAllOrders();
             res.json(orders);
         }
         catch (error) {
             console.error('Error getting artificial orders:', error);
             res.status(500).json({
-                code: 'SERVER_ERROR',
+                code: ErrorCodes.INTERNAL_ERROR,
                 message: 'Failed to get artificial orders'
             });
         }
@@ -160,7 +156,7 @@ class ArtificialOrdersController {
             const order = this.orderManager.getOrder(orderId);
             if (!order) {
                 res.status(404).json({
-                    code: 'ORDER_NOT_FOUND',
+                    code: ErrorCodes.ORDER_NOT_FOUND,
                     message: `Artificial order ${orderId} not found`
                 });
                 return;
@@ -170,7 +166,7 @@ class ArtificialOrdersController {
         catch (error) {
             console.error('Error getting artificial order:', error);
             res.status(500).json({
-                code: 'SERVER_ERROR',
+                code: ErrorCodes.INTERNAL_ERROR,
                 message: 'Failed to get artificial order'
             });
         }
@@ -183,27 +179,31 @@ class ArtificialOrdersController {
     cancelOrder(req, res) {
         try {
             const orderId = req.params.id;
-            const order = this.orderManager.cancelOrder(orderId);
-            if (!order) {
-                res.status(404).json({
-                    code: 'ORDER_NOT_FOUND',
-                    message: `Artificial order ${orderId} not found`
-                });
-                return;
-            }
-            if (order.status !== 'canceled') {
+            const success = this.orderManager.cancelOrder(orderId);
+            if (!success) {
+                // Get the order to check if it exists or just couldn't be canceled
+                const order = this.orderManager.getOrder(orderId);
+                if (!order) {
+                    res.status(404).json({
+                        code: ErrorCodes.ORDER_NOT_FOUND,
+                        message: `Artificial order ${orderId} not found`
+                    });
+                    return;
+                }
                 res.status(400).json({
-                    code: 'CANNOT_CANCEL',
+                    code: ErrorCodes.ORDER_ALREADY_FILLED,
                     message: `Order ${orderId} is already ${order.status} and cannot be canceled`
                 });
                 return;
             }
-            res.json(order);
+            // Get the updated order after cancellation
+            const updatedOrder = this.orderManager.getOrder(orderId);
+            res.json(updatedOrder);
         }
         catch (error) {
             console.error('Error canceling artificial order:', error);
             res.status(500).json({
-                code: 'SERVER_ERROR',
+                code: ErrorCodes.INTERNAL_ERROR,
                 message: 'Failed to cancel artificial order'
             });
         }
@@ -216,4 +216,3 @@ class ArtificialOrdersController {
         return this.router;
     }
 }
-exports.ArtificialOrdersController = ArtificialOrdersController;

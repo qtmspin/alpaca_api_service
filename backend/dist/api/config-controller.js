@@ -1,4 +1,3 @@
-"use strict";
 /**
  * config-controller.ts
  *
@@ -10,24 +9,23 @@
  * - Get and update service configuration
  * - Validate configuration changes
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.ConfigController = void 0;
-const express_1 = require("express");
-const core_1 = require("../core");
-const zod_1 = require("zod");
+import { Router } from 'express';
+import { ApplicationError } from '../core/errors.js';
+import { ConfigUpdateSchema } from '../core/index.js';
+import { z } from 'zod';
 /**
  * ConfigController class
  *
  * Handles API endpoints for managing service configuration.
  */
-class ConfigController {
+export class ConfigController {
     /**
      * Constructor for ConfigController
      * @param configManager - Configuration manager instance
      */
     constructor(configManager) {
         this.configManager = configManager;
-        this.router = (0, express_1.Router)();
+        this.router = Router();
         this.setupRoutes();
     }
     /**
@@ -59,30 +57,27 @@ class ConfigController {
     async updateConfig(req, res, next) {
         try {
             // Validate request body against schema
-            const updates = core_1.ConfigUpdateSchema.parse(req.body);
+            const validatedUpdates = ConfigUpdateSchema.parse(req.body);
+            // Type assertion to handle partial properties
+            const updates = validatedUpdates;
             // Update configuration
             const updatedConfig = await this.configManager.updateRuntimeConfig(updates);
             res.json(updatedConfig);
         }
         catch (error) {
-            if (error instanceof zod_1.z.ZodError) {
+            if (error instanceof z.ZodError) {
                 // Handle validation errors
                 const fieldErrors = error.errors.reduce((acc, err) => {
                     acc[err.path.join('.')] = err.message;
                     return acc;
                 }, {});
-                const validationError = new Error('Validation failed');
-                validationError.statusCode = 400;
-                validationError.code = 'INVALID_CONFIG';
-                validationError.fields = fieldErrors;
+                const validationError = new ApplicationError('INVALID_CONFIG', 'Validation failed', { fields: fieldErrors });
                 next(validationError);
             }
             else {
                 // Handle other errors
                 const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                const serverError = new Error(errorMessage || 'Failed to update configuration');
-                serverError.statusCode = 500;
-                serverError.code = 'SERVER_ERROR';
+                const serverError = new ApplicationError('SERVER_ERROR', errorMessage || 'Failed to update configuration');
                 next(serverError);
             }
         }
@@ -121,4 +116,3 @@ class ConfigController {
         return this.router;
     }
 }
-exports.ConfigController = ConfigController;

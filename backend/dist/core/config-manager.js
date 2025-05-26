@@ -1,186 +1,142 @@
-"use strict";
 /**
  * config-manager.ts
  *
- * This file contains the implementation for managing service configuration.
- * It handles loading, validating, and updating configuration settings.
+ * This file manages application configuration loading and validation.
  * Location: backend/src/core/config-manager.ts
  *
  * Responsibilities:
- * - Load configuration from file or environment variables
+ * - Load configuration from JSON files
  * - Validate configuration using Zod schemas
- * - Provide methods to update runtime configuration
- * - Notify subscribers when configuration changes
+ * - Provide type-safe configuration access
+ * - Handle configuration updates
  */
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.ConfigManager = void 0;
-const promises_1 = __importDefault(require("fs/promises"));
-const path_1 = __importDefault(require("path"));
-const schemas_1 = require("./schemas");
-/**
- * ConfigManager class
- *
- * Manages service configuration, including loading, validation, and updates.
- * Separates runtime settings (can be changed without restart) from startup settings.
- */
-class ConfigManager {
-    /**
-     * Constructor for ConfigManager
-     * @param configPath - Path to the configuration file
-     */
+import fs from 'fs/promises';
+import path from 'path';
+import { AppConfigSchema } from './schemas.js';
+export class ConfigManager {
     constructor(configPath) {
-        this.listeners = [];
-        this.configPath = configPath;
-        // Initialize with default values from schema
-        this.config = {
-            runtime: {
-                alpaca: {
-                    apiKey: '',
-                    apiSecret: '',
-                    paperTrading: true
-                },
-                rateLimits: {
-                    orders: 200,
-                    data: 200,
-                    burst: 10
-                },
-                orderRules: {
-                    cooldownMs: 1000,
-                    duplicateWindowMs: 5000,
-                    maxPerSymbol: 5,
-                    maxTotal: 50
-                },
-                marketHours: {
-                    enablePreMarket: true,
-                    enableAfterHours: true
-                },
-                monitoring: {
-                    priceCheckIntervalMs: 100,
-                    websocketHeartbeatMs: 30000
-                }
-            },
-            startup: {
-                apiPort: 9000,
-                monitorPort: 5900
-            }
-        };
+        this.config = null;
+        this.configPath = path.resolve(configPath);
     }
     /**
      * Load configuration from file
-     * @returns Promise resolving to the loaded configuration
      */
     async loadConfig() {
         try {
-            const configDir = path_1.default.dirname(this.configPath);
-            await promises_1.default.mkdir(configDir, { recursive: true });
-            const fileExists = await promises_1.default.access(this.configPath)
-                .then(() => true)
-                .catch(() => false);
-            if (fileExists) {
-                console.log(`Loading configuration from: ${this.configPath}`);
-                const configData = await promises_1.default.readFile(this.configPath, 'utf-8');
-                const parsedConfig = JSON.parse(configData);
-                // Validate and set defaults for any missing fields
-                this.config = {
-                    ...this.config, // Start with defaults
-                    ...parsedConfig, // Override with any values from the file
-                    runtime: {
-                        ...this.config.runtime,
-                        ...(parsedConfig.runtime || {})
-                    },
-                    startup: {
-                        ...this.config.startup,
-                        ...(parsedConfig.startup || {})
-                    }
-                };
-                // Validate the final config
-                this.config = schemas_1.ServiceConfigSchema.parse(this.config);
-            }
-            else {
-                console.log('No config file found, using defaults');
-                // Create a new config file with defaults if it doesn't exist
-                await this.saveConfig();
-            }
-            return this.config;
+            // Check if config file exists
+            await fs.access(this.configPath);
+            // Read and parse config file
+            const configData = await fs.readFile(this.configPath, 'utf-8');
+            const rawConfig = JSON.parse(configData);
+            // Validate configuration using Zod schema
+            const validatedConfig = AppConfigSchema.parse(rawConfig);
+            this.config = validatedConfig;
+            return validatedConfig;
         }
         catch (error) {
-            console.error('Error loading configuration:', error);
-            throw new Error(`Failed to load configuration: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+                throw new Error(`Configuration file not found: ${this.configPath}`);
+            }
+            throw new Error(`Failed to load configuration: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
     /**
-     * Save configuration to file
-     * @returns Promise resolving when the configuration is saved
-     */
-    async saveConfig() {
-        try {
-            const configDir = path_1.default.dirname(this.configPath);
-            await promises_1.default.mkdir(configDir, { recursive: true });
-            await promises_1.default.writeFile(this.configPath, JSON.stringify(this.config, null, 2), 'utf-8');
-        }
-        catch (error) {
-            console.error('Error saving configuration:', error);
-            throw new Error(`Failed to save configuration: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
-    }
-    /**
-     * Get the current configuration
-     * @returns The current service configuration
+     * Get current configuration
      */
     getConfig() {
+        if (!this.config) {
+            throw new Error('Configuration not loaded. Call loadConfig() first.');
+        }
         return this.config;
     }
     /**
-     * Update runtime configuration settings
-     * @param updates - Partial configuration updates
-     * @returns The updated configuration
+     * Save configuration to file
      */
-    async updateRuntimeConfig(updates) {
+    async saveConfig(config) {
         try {
-            // Validate the updates against the schema
-            const validatedUpdates = schemas_1.ConfigUpdateSchema.parse(updates);
-            // Only allow updating runtime settings
-            if (validatedUpdates.runtime) {
-                this.config = {
-                    ...this.config,
-                    runtime: {
-                        ...this.config.runtime,
-                        ...validatedUpdates.runtime
-                    }
-                };
-                // Save the updated configuration
-                await this.saveConfig();
-                // Notify listeners of the change
-                this.notifyListeners();
-            }
-            return this.config;
+            // Validate configuration
+            const validatedConfig = AppConfigSchema.parse(config);
+            // Ensure directory exists
+            const configDir = path.dirname(this.configPath);
+            await fs.mkdir(configDir, { recursive: true });
+            // Write configuration to file
+            await fs.writeFile(this.configPath, JSON.stringify(validatedConfig, null, 2), 'utf-8');
+            this.config = validatedConfig;
         }
         catch (error) {
-            console.error('Error updating configuration:', error);
-            throw new Error(`Failed to update configuration: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            throw new Error(`Failed to save configuration: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
     /**
-     * Subscribe to configuration changes
-     * @param listener - Function to call when configuration changes
-     * @returns Unsubscribe function
+     * Update specific configuration section
      */
-    subscribe(listener) {
-        this.listeners.push(listener);
-        return () => {
-            this.listeners = this.listeners.filter(l => l !== listener);
+    async updateConfig(updates) {
+        const currentConfig = this.getConfig();
+        const newConfig = { ...currentConfig, ...updates };
+        await this.saveConfig(newConfig);
+        return newConfig;
+    }
+    /**
+     * Update runtime configuration section only
+     * @param updates - Partial runtime configuration updates
+     * @returns Updated application configuration
+     */
+    async updateRuntimeConfig(updates) {
+        const currentConfig = this.getConfig();
+        const newConfig = {
+            ...currentConfig,
+            runtime: { ...currentConfig.runtime, ...updates }
         };
+        await this.saveConfig(newConfig);
+        return newConfig;
     }
     /**
-     * Notify all listeners of configuration changes
+     * Create default configuration file
      */
-    notifyListeners() {
-        for (const listener of this.listeners) {
-            listener(this.config);
+    async createDefaultConfig() {
+        const defaultConfig = {
+            startup: {
+                apiPort: 9000,
+                wsPort: 9001,
+                host: 'localhost'
+            },
+            runtime: {
+                alpaca: {
+                    apiKey: process.env.ALPACA_API_KEY || '',
+                    secretKey: process.env.ALPACA_SECRET_KEY || '',
+                    isPaper: true,
+                    baseUrl: 'https://paper-api.alpaca.markets'
+                },
+                monitoring: {
+                    priceCheckIntervalMs: 5000,
+                    maxRetries: 3,
+                    retryDelayMs: 1000
+                },
+                rateLimits: {
+                    orders: 200,
+                    data: 500
+                }
+            }
+        };
+        await this.saveConfig(defaultConfig);
+        return defaultConfig;
+    }
+    /**
+     * Check if configuration file exists
+     */
+    async configExists() {
+        try {
+            await fs.access(this.configPath);
+            return true;
         }
+        catch {
+            return false;
+        }
+    }
+    /**
+     * Get configuration file path
+     */
+    getConfigPath() {
+        return this.configPath;
     }
 }
-exports.ConfigManager = ConfigManager;

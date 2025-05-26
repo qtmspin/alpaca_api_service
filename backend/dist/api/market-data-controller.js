@@ -1,4 +1,3 @@
-"use strict";
 /**
  * market-data-controller.ts
  *
@@ -9,22 +8,21 @@
  * - Handle API endpoints for market data
  * - Get quotes and historical bars
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.MarketDataController = void 0;
-const express_1 = require("express");
+import { Router } from 'express';
+import { ApplicationError } from '../core/errors.js';
 /**
  * MarketDataController class
  *
  * Handles API endpoints for market data.
  */
-class MarketDataController {
+export class MarketDataController {
     /**
      * Constructor for MarketDataController
      * @param alpacaClient - Alpaca client instance
      */
     constructor(alpacaClient) {
         this.alpacaClient = alpacaClient;
-        this.router = (0, express_1.Router)();
+        this.router = Router();
         this.setupRoutes();
     }
     /**
@@ -50,9 +48,7 @@ class MarketDataController {
         }
         catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            const serverError = new Error(errorMessage || `Failed to get quote for ${req.params.symbol}`);
-            serverError.statusCode = 500;
-            serverError.code = 'SERVER_ERROR';
+            const serverError = new ApplicationError('SERVER_ERROR', errorMessage || `Failed to get quote for ${req.params.symbol}`);
             next(serverError);
         }
     }
@@ -73,9 +69,7 @@ class MarketDataController {
             // Validate timeframe
             const validTimeframes = ['1Min', '5Min', '15Min', '1H', '1D'];
             if (!validTimeframes.includes(timeframe)) {
-                const validationError = new Error(`Invalid timeframe: ${timeframe}. Valid values are: ${validTimeframes.join(', ')}`);
-                validationError.statusCode = 400;
-                validationError.code = 'INVALID_TIMEFRAME';
+                const validationError = new ApplicationError('INVALID_TIMEFRAME', `Invalid timeframe: ${timeframe}. Valid values are: ${validTimeframes.join(', ')}`);
                 next(validationError);
                 return;
             }
@@ -84,9 +78,7 @@ class MarketDataController {
         }
         catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            const serverError = new Error(errorMessage || `Failed to get bars for ${req.params.symbol}`);
-            serverError.statusCode = 500;
-            serverError.code = 'SERVER_ERROR';
+            const serverError = new ApplicationError('SERVER_ERROR', errorMessage || `Failed to get bars for ${req.params.symbol}`);
             next(serverError);
         }
     }
@@ -98,4 +90,3 @@ class MarketDataController {
         return this.router;
     }
 }
-exports.MarketDataController = MarketDataController;

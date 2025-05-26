@@ -1,4 +1,3 @@
-"use strict";
 /**
  * order-controller.ts
  *
@@ -10,18 +9,16 @@
  * - Create, get, and cancel orders
  * - Implement order validation, cooldown, and duplicate detection
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.OrderController = void 0;
-const express_1 = require("express");
-const core_1 = require("../core");
-const errors_1 = require("../core/errors");
-const zod_1 = require("zod");
+import { Router } from 'express';
+import { OrderRequestSchema, isPreMarketHours, isPostMarketHours } from '../core/index.js';
+import { ApplicationError, ErrorCodes, RateLimitError, OrderError } from '../core/errors.js';
+import { z } from 'zod';
 /**
  * OrderController class
  *
  * Handles API endpoints for order management.
  */
-class OrderController {
+export class OrderController {
     /**
      * Constructor for OrderController
      * @param alpacaClient - Alpaca client instance
@@ -32,7 +29,7 @@ class OrderController {
         this.config = config;
         this.orderCooldowns = new Map();
         this.recentOrders = new Map();
-        this.router = (0, express_1.Router)();
+        this.router = Router();
         this.runtimeConfig = config;
         this.setupRoutes();
     }
@@ -58,38 +55,27 @@ class OrderController {
     async createOrder(req, res, next) {
         try {
             // Validate request body against schema
-            const orderRequest = core_1.OrderRequestSchema.parse(req.body);
+            const orderRequest = OrderRequestSchema.parse(req.body);
             // Check for rate limits
             if (this.isRateLimitExceeded()) {
-                const rateLimitError = (0, errors_1.createRateLimitError)('Order rate limit exceeded', 45 // Example value
-                );
-                next(rateLimitError);
-                return;
+                throw new RateLimitError('Order rate limit exceeded');
             }
             // Check for cooldown
             const cooldownMs = this.getCooldownRemaining(orderRequest.symbol);
             if (cooldownMs > 0) {
-                const cooldownError = (0, errors_1.createCooldownError)(`Order cooldown active for ${orderRequest.symbol}`, cooldownMs);
-                next(cooldownError);
-                return;
+                throw new RateLimitError(`Order cooldown active for ${orderRequest.symbol}`, cooldownMs);
             }
             // Check for duplicate orders
             const duplicateOrderId = this.checkForDuplicateOrder(orderRequest);
             if (duplicateOrderId) {
-                const duplicateError = (0, errors_1.createDuplicateOrderError)(`Duplicate order detected within ${this.config.orderRules.duplicateWindowMs}ms window`, duplicateOrderId);
-                next(duplicateError);
-                return;
+                throw new OrderError(`Duplicate order detected within ${this.config.orderRules.duplicateWindowMs}ms window`, duplicateOrderId);
             }
             // Check market hours for stop and stop-limit orders during extended hours
             const now = new Date();
-            const isExtendedHours = (0, core_1.isPreMarketHours)(now) || (0, core_1.isPostMarketHours)(now);
+            const isExtendedHours = isPreMarketHours() || isPostMarketHours();
             if (isExtendedHours &&
-                (orderRequest.orderType === 'stop' || orderRequest.orderType === 'stop_limit')) {
-                const marketHoursError = new Error('Stop and stop-limit orders are not supported during extended hours. Use artificial orders instead.');
-                marketHoursError.statusCode = 400;
-                marketHoursError.code = 'UNSUPPORTED_ORDER_TYPE';
-                next(marketHoursError);
-                return;
+                (orderRequest.type === 'stop' || orderRequest.type === 'stop_limit')) {
+                throw new ApplicationError(ErrorCodes.VALIDATION_ERROR, 'Stop and stop-limit orders are not supported during extended hours. Use artificial orders instead.');
             }
             // Create the order
             const order = await this.alpacaClient.createOrder(orderRequest);
@@ -99,28 +85,22 @@ class OrderController {
             res.status(201).json(order);
         }
         catch (error) {
-            if (error instanceof zod_1.z.ZodError) {
+            if (error instanceof z.ZodError) {
                 // Handle validation errors
                 const fieldErrors = error.errors.reduce((acc, err) => {
                     acc[err.path.join('.')] = err.message;
                     return acc;
                 }, {});
-                const validationError = (0, errors_1.createValidationError)('Invalid order request', fieldErrors);
-                next(validationError);
+                throw new ApplicationError(ErrorCodes.VALIDATION_ERROR, 'Invalid order parameters', fieldErrors);
             }
             else if (error.statusCode) {
                 // Pass through Alpaca API errors
-                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                const apiError = new Error(errorMessage || 'Alpaca API error');
-                apiError.statusCode = error.statusCode;
-                apiError.code = error.code || 'ALPACA_API_ERROR';
-                next(apiError);
+                const errorResponse = error;
+                throw new ApplicationError(ErrorCodes.ALPACA_API_ERROR, errorResponse.message || 'Alpaca API error');
             }
             else {
                 // Handle other errors
-                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                const serverError = (0, errors_1.createServerError)(errorMessage || 'Failed to create order');
-                next(serverError);
+                throw new ApplicationError(ErrorCodes.INTERNAL_ERROR, 'Failed to create order');
             }
         }
     }
@@ -138,9 +118,7 @@ class OrderController {
             res.json(orders);
         }
         catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            const serverError = (0, errors_1.createServerError)(errorMessage || 'Failed to get orders');
-            next(serverError);
+            throw new ApplicationError(ErrorCodes.INTERNAL_ERROR, 'Failed to get orders');
         }
     }
     /**
@@ -157,13 +135,10 @@ class OrderController {
         }
         catch (error) {
             if (error.statusCode === 404) {
-                const notFoundError = (0, errors_1.createNotFoundError)(`Order ${req.params.orderId} not found`, 'ORDER_NOT_FOUND');
-                next(notFoundError);
+                throw new ApplicationError(ErrorCodes.ORDER_NOT_FOUND, `Order ${req.params.orderId} not found`);
             }
             else {
-                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                const serverError = (0, errors_1.createServerError)(errorMessage || 'Failed to get order');
-                next(serverError);
+                throw new ApplicationError(ErrorCodes.INTERNAL_ERROR, 'Failed to get order');
             }
         }
     }
@@ -181,13 +156,10 @@ class OrderController {
         }
         catch (error) {
             if (error.statusCode === 404) {
-                const notFoundError = (0, errors_1.createNotFoundError)(`Order ${req.params.orderId} not found`, 'ORDER_NOT_FOUND');
-                next(notFoundError);
+                throw new ApplicationError(ErrorCodes.ORDER_NOT_FOUND, `Order ${req.params.orderId} not found`);
             }
             else {
-                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                const serverError = (0, errors_1.createServerError)(errorMessage || 'Failed to cancel order');
-                next(serverError);
+                throw new ApplicationError(ErrorCodes.INTERNAL_ERROR, 'Failed to cancel order');
             }
         }
     }
@@ -269,7 +241,7 @@ class OrderController {
      * @returns Order key
      */
     getOrderKey(orderRequest) {
-        return `${orderRequest.symbol}_${orderRequest.side}_${orderRequest.orderType}_${orderRequest.qty}`;
+        return `${orderRequest.symbol}_${orderRequest.side}_${orderRequest.type}_${orderRequest.qty}`;
     }
     /**
      * Get the router instance
@@ -279,4 +251,3 @@ class OrderController {
         return this.router;
     }
 }
-exports.OrderController = OrderController;

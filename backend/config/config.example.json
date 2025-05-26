@@ -1,0 +1,23 @@
+{
+  "startup": {
+    "apiPort": 3000,
+    "wsPort": 3001,
+    "host": "0.0.0.0"
+  },
+  "runtime": {
+    "alpaca": {
+      "apiKey": "YOUR_API_KEY",
+      "secretKey": "YOUR_SECRET_KEY",
+      "isPaper": true
+    },
+    "monitoring": {
+      "priceCheckIntervalMs": 5000,
+      "maxRetries": 3,
+      "retryDelayMs": 1000
+    },
+    "rateLimits": {
+      "orders": 200,
+      "data": 500
+    }
+  }
+}

@@ -13,7 +13,7 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import { AppConfig, AppConfigSchema } from './schemas';
+import { AppConfig, AppConfigSchema } from './schemas.js';
 
 export class ConfigManager {
   private configPath: string;
@@ -98,6 +98,22 @@ export class ConfigManager {
   }
 
   /**
+   * Update runtime configuration section only
+   * @param updates - Partial runtime configuration updates
+   * @returns Updated application configuration
+   */
+  async updateRuntimeConfig(updates: Partial<AppConfig['runtime']>): Promise<AppConfig> {
+    const currentConfig = this.getConfig();
+    const newConfig = { 
+      ...currentConfig, 
+      runtime: { ...currentConfig.runtime, ...updates }
+    };
+    
+    await this.saveConfig(newConfig);
+    return newConfig;
+  }
+
+  /**
    * Create default configuration file
    */
   async createDefaultConfig(): Promise<AppConfig> {
@@ -118,6 +134,10 @@ export class ConfigManager {
           priceCheckIntervalMs: 5000,
           maxRetries: 3,
           retryDelayMs: 1000
+        },
+        rateLimits: {
+          orders: 200,
+          data: 500
         }
       }
     };

@@ -103,7 +103,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   initWebSocket: () => {
     set({ wsConnection: 'connecting' })
     
-    const ws = new WebSocket('ws://localhost:9000/ws')
+    const ws = new WebSocket('ws://localhost:9000')
     
     ws.onopen = () => {
       set({ wsConnection: 'connected' })

@@ -10,16 +10,29 @@
  */
 
 // Export schemas and types
-export * from './schemas';
+export * from './schemas.js';
 
 // Export configuration manager
-export { ConfigManager } from './config-manager';
+export { ConfigManager } from './config-manager.js';
 
 // Export artificial orders manager
-export { ArtificialOrderManager, type ArtificialOrder } from './artificial-orders';
+export { ArtificialOrderManager, type ArtificialOrder } from './artificial-orders.js';
 
 // Export market hours constants
-export { MARKET_HOURS } from './schemas';
+export { MARKET_HOURS } from './schemas.js';
 
 // Export error types and utilities
-export * from './errors';
+// Export specific error types to avoid ambiguity with schemas.js exports
+export { 
+  createServerError,
+  ErrorCodes,
+  ApplicationError,
+  RateLimitError,
+  OrderError,
+  ConfigurationError,
+  AlpacaAPIError,
+  WebSocketError,
+  AuthenticationError,
+  MarketDataError,
+  ErrorHandler
+} from './errors.js';

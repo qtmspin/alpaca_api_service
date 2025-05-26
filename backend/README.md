@@ -36,7 +36,7 @@ This is the backend service for the Alpaca API integration, providing a clean in
      "runtime": {
        "alpaca": {
          "apiKey": "YOUR_API_KEY",
-         "apiSecret": "YOUR_API_SECRET",
+         "secretKey": "YOUR_API_SECRET",
          "paperTrading": true
        }
      }

@@ -11,8 +11,8 @@
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
-import { ApiError } from '../core/errors';
-import { ConfigManager, ConfigUpdateSchema } from '../core';
+import { AppError, ApplicationError } from '../core/errors.js';
+import { ConfigManager, ConfigUpdateSchema, RuntimeConfig } from '../core/index.js';
 import { z } from 'zod';
 
 /**
@@ -65,7 +65,10 @@ export class ConfigController {
   private async updateConfig(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       // Validate request body against schema
-      const updates = ConfigUpdateSchema.parse(req.body);
+      const validatedUpdates = ConfigUpdateSchema.parse(req.body);
+      
+      // Type assertion to handle partial properties
+      const updates = validatedUpdates as unknown as Partial<RuntimeConfig>;
       
       // Update configuration
       const updatedConfig = await this.configManager.updateRuntimeConfig(updates);
@@ -79,18 +82,13 @@ export class ConfigController {
           return acc;
         }, {});
         
-        const validationError = new Error('Validation failed') as ApiError;
-        validationError.statusCode = 400;
-        validationError.code = 'INVALID_CONFIG';
-        validationError.fields = fieldErrors;
+        const validationError = new ApplicationError('INVALID_CONFIG', 'Validation failed', { fields: fieldErrors });
         
         next(validationError);
       } else {
         // Handle other errors
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        const serverError = new Error(errorMessage || 'Failed to update configuration') as ApiError;
-        serverError.statusCode = 500;
-        serverError.code = 'SERVER_ERROR';
+        const serverError = new ApplicationError('SERVER_ERROR', errorMessage || 'Failed to update configuration');
         
         next(serverError);
       }

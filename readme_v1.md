@@ -154,7 +154,7 @@ interface ServiceConfig {
     // Alpaca API Settings
     alpaca: {
       apiKey: string;            // Alpaca API key
-      apiSecret: string;         // Alpaca API secret
+      secretKey: string;         // Alpaca API secret
       paperTrading: boolean;     // Use paper trading environment
     };
     

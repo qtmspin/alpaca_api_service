@@ -12,9 +12,26 @@
 
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
-import { ArtificialOrderData, OrderSide, OrderType, TimeInForce } from './schemas';
+import { ArtificialOrderData, OrderSide, OrderType, TimeInForce } from './schemas.js';
 
-export interface ArtificialOrder extends ArtificialOrderData {}
+export interface ArtificialOrder extends ArtificialOrderData {
+  id: string;
+  symbol: string;
+  qty: number;
+  side: OrderSide;
+  type: OrderType;
+  limit_price?: number;
+  stop_price?: number;
+  time_in_force: 'day' | 'gtc';
+  status: 'pending' | 'filled' | 'cancelled' | 'expired';
+  created_at: string;
+  updated_at: string;
+  trigger_condition?: {
+    field: 'price' | 'volume';
+    operator: 'gte' | 'lte' | 'eq';
+    value: number;
+  };
+}
 
 export interface TriggerCondition {
   field: 'price' | 'volume';
@@ -31,6 +48,27 @@ export interface CreateArtificialOrderRequest {
   stop_price?: number;
   time_in_force: TimeInForce;
   trigger_condition?: TriggerCondition;
+}
+
+// Utility function to check if an artificial order can be executed
+export function canExecuteArtificialOrder(order: ArtificialOrder, marketData: { price: number; volume?: number }): boolean {
+  if (!order.trigger_condition) {
+    return true;
+  }
+
+  const { field, operator, value } = order.trigger_condition;
+  const marketValue = field === 'price' ? marketData.price : (marketData.volume || 0);
+
+  switch (operator) {
+    case 'gte':
+      return marketValue >= value;
+    case 'lte':
+      return marketValue <= value;
+    case 'eq':
+      return marketValue === value;
+    default:
+      return false;
+  }
 }
 
 export class ArtificialOrderManager extends EventEmitter {

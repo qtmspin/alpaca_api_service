@@ -1,4 +1,3 @@
-"use strict";
 /**
  * routes.ts
  *
@@ -10,18 +9,14 @@
  * - Connect controllers to routes
  * - Set up middleware for routes
  */
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.setupApiRoutes = setupApiRoutes;
-const express_1 = __importDefault(require("express"));
-const config_controller_1 = require("./config-controller");
-const account_controller_1 = require("./account-controller");
-const order_controller_1 = require("./order-controller");
-const position_controller_1 = require("./position-controller");
-const market_data_controller_1 = require("./market-data-controller");
-const artificial_orders_controller_1 = require("./artificial-orders-controller");
+import express from 'express';
+import { ConfigController } from './config-controller.js';
+import { AccountController } from './account-controller.js';
+import { OrderController } from './order-controller.js';
+import { PositionController } from './position-controller.js';
+import { MarketDataController } from './market-data-controller.js';
+import { ArtificialOrdersController } from './artificial-orders-controller.js';
+import { AlpacaController } from './alpaca-controller.js';
 /**
  * Set up all API routes
  * @param app - Express application
@@ -29,17 +24,19 @@ const artificial_orders_controller_1 = require("./artificial-orders-controller")
  * @param alpacaClient - Alpaca client instance
  * @param orderManager - Artificial order manager instance
  */
-function setupApiRoutes(app, configManager, alpacaClient, orderManager) {
+export function setupApiRoutes(app, configManager, alpacaClient, orderManager) {
     // Get current configuration
     const config = configManager.getConfig();
     // Create controllers
-    const configController = new config_controller_1.ConfigController(configManager);
-    const accountController = new account_controller_1.AccountController(alpacaClient);
-    const orderController = new order_controller_1.OrderController(alpacaClient, config.runtime);
-    const positionController = new position_controller_1.PositionController(alpacaClient);
-    const marketDataController = new market_data_controller_1.MarketDataController(alpacaClient);
-    const artificialOrdersController = new artificial_orders_controller_1.ArtificialOrdersController(orderManager, config.runtime, alpacaClient);
+    const configController = new ConfigController(configManager);
+    const accountController = new AccountController(alpacaClient);
+    const orderController = new OrderController(alpacaClient, config.runtime);
+    const positionController = new PositionController(alpacaClient);
+    const marketDataController = new MarketDataController(alpacaClient);
+    const artificialOrdersController = new ArtificialOrdersController(orderManager, config.runtime, alpacaClient);
+    const alpacaController = new AlpacaController(alpacaClient);
     // Set up API routes
+    app.use('/api/alpaca', alpacaController.getRouter());
     app.use('/api/config', configController.getRouter());
     app.use('/api/account', accountController.getRouter());
     app.use('/api/orders', orderController.getRouter());
@@ -58,7 +55,7 @@ function setupApiRoutes(app, configManager, alpacaClient, orderManager) {
         res.redirect('/docs/api-endpoint-management.md');
     });
     // Serve static documentation files
-    app.use('/docs', express_1.default.static('docs'));
+    app.use('/docs', express.static('docs'));
     // Error handling middleware
     app.use((err, req, res, next) => {
         console.error('API Error:', err);

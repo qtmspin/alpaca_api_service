@@ -2,7 +2,7 @@
   "runtime": {
     "alpaca": {
       "apiKey": "PKKON5IWMWKI301U6ZHG",
-      "apiSecret": "JOdYOotkvgfZR9mzU3p76o606YUrj3Vu7TemnC4H",
+      "secretKey": "JOdYOotkvgfZR9mzU3p76o606YUrj3Vu7TemnC4H",
       "isPaper": true,
       "baseUrl": "https://paper-api.alpaca.markets"
     },

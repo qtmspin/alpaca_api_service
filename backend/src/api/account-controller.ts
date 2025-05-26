@@ -10,7 +10,7 @@
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
-import { ApiError } from '../core/errors';
+import { AppError, ApplicationError } from '../core/errors.js';
 
 /**
  * AccountController class
@@ -49,9 +49,7 @@ export class AccountController {
       res.json(account);
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      const serverError = new Error(errorMessage || 'Failed to get account information') as ApiError;
-      serverError.statusCode = 500;
-      serverError.code = 'SERVER_ERROR';
+      const serverError = new ApplicationError('SERVER_ERROR', errorMessage || 'Failed to get account information');
       
       next(serverError);
     }

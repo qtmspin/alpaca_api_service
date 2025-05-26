@@ -11,16 +11,8 @@
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
-import { OrderRequestSchema, isPreMarketHours, isPostMarketHours } from '../core';
-import { 
-  ApiError, 
-  createValidationError,
-  createRateLimitError,
-  createCooldownError,
-  createDuplicateOrderError,
-  createNotFoundError,
-  createServerError 
-} from '../core/errors';
+import { OrderRequestSchema, isPreMarketHours, isPostMarketHours } from '../core/index.js';
+import { ApplicationError, ErrorCodes, RateLimitError, OrderError } from '../core/errors.js';
 import { z } from 'zod';
 
 /**
@@ -75,51 +67,28 @@ export class OrderController {
       
       // Check for rate limits
       if (this.isRateLimitExceeded()) {
-        const rateLimitError = createRateLimitError(
-          'Order rate limit exceeded',
-          45 // Example value
-        );
-        
-        next(rateLimitError);
-        return;
+        throw new RateLimitError('Order rate limit exceeded');
       }
       
       // Check for cooldown
       const cooldownMs = this.getCooldownRemaining(orderRequest.symbol);
       if (cooldownMs > 0) {
-        const cooldownError = createCooldownError(
-          `Order cooldown active for ${orderRequest.symbol}`,
-          cooldownMs
-        );
-        
-        next(cooldownError);
-        return;
+        throw new RateLimitError(`Order cooldown active for ${orderRequest.symbol}`, cooldownMs);
       }
       
       // Check for duplicate orders
       const duplicateOrderId = this.checkForDuplicateOrder(orderRequest);
       if (duplicateOrderId) {
-        const duplicateError = createDuplicateOrderError(
-          `Duplicate order detected within ${this.config.orderRules.duplicateWindowMs}ms window`,
-          duplicateOrderId
-        );
-        
-        next(duplicateError);
-        return;
+        throw new OrderError(`Duplicate order detected within ${this.config.orderRules.duplicateWindowMs}ms window`, duplicateOrderId);
       }
       
       // Check market hours for stop and stop-limit orders during extended hours
       const now = new Date();
-      const isExtendedHours = isPreMarketHours(now) || isPostMarketHours(now);
+      const isExtendedHours = isPreMarketHours() || isPostMarketHours();
       
       if (isExtendedHours && 
-          (orderRequest.orderType === 'stop' || orderRequest.orderType === 'stop_limit')) {
-        const marketHoursError = new Error('Stop and stop-limit orders are not supported during extended hours. Use artificial orders instead.') as ApiError;
-        marketHoursError.statusCode = 400;
-        marketHoursError.code = 'UNSUPPORTED_ORDER_TYPE';
-        
-        next(marketHoursError);
-        return;
+          (orderRequest.type === 'stop' || orderRequest.type === 'stop_limit')) {
+        throw new ApplicationError(ErrorCodes.VALIDATION_ERROR, 'Stop and stop-limit orders are not supported during extended hours. Use artificial orders instead.');
       }
       
       // Create the order
@@ -138,21 +107,14 @@ export class OrderController {
           return acc;
         }, {} as Record<string, string>);
         
-        const validationError = createValidationError('Invalid order request', fieldErrors);
-        next(validationError);
+        throw new ApplicationError(ErrorCodes.VALIDATION_ERROR, 'Invalid order parameters', fieldErrors);
       } else if ((error as any).statusCode) {
         // Pass through Alpaca API errors
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        const apiError = new Error(errorMessage || 'Alpaca API error') as ApiError;
-        apiError.statusCode = (error as any).statusCode;
-        apiError.code = (error as any).code || 'ALPACA_API_ERROR';
-        
-        next(apiError);
+        const errorResponse = error as { statusCode?: number; message?: string };
+        throw new ApplicationError(ErrorCodes.ALPACA_API_ERROR, errorResponse.message || 'Alpaca API error');
       } else {
         // Handle other errors
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        const serverError = createServerError(errorMessage || 'Failed to create order');
-        next(serverError);
+        throw new ApplicationError(ErrorCodes.INTERNAL_ERROR, 'Failed to create order');
       }
     }
   }
@@ -171,9 +133,7 @@ export class OrderController {
       const orders = await this.alpacaClient.getOrders(status, limit);
       res.json(orders);
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      const serverError = createServerError(errorMessage || 'Failed to get orders');
-      next(serverError);
+      throw new ApplicationError(ErrorCodes.INTERNAL_ERROR, 'Failed to get orders');
     }
   }
   
@@ -190,16 +150,9 @@ export class OrderController {
       res.json(order);
     } catch (error: unknown) {
       if ((error as any).statusCode === 404) {
-        const notFoundError = createNotFoundError(
-          `Order ${req.params.orderId} not found`,
-          'ORDER_NOT_FOUND'
-        );
-        
-        next(notFoundError);
+        throw new ApplicationError(ErrorCodes.ORDER_NOT_FOUND, `Order ${req.params.orderId} not found`);
       } else {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        const serverError = createServerError(errorMessage || 'Failed to get order');
-        next(serverError);
+        throw new ApplicationError(ErrorCodes.INTERNAL_ERROR, 'Failed to get order');
       }
     }
   }
@@ -217,16 +170,9 @@ export class OrderController {
       res.json(result);
     } catch (error: unknown) {
       if ((error as any).statusCode === 404) {
-        const notFoundError = createNotFoundError(
-          `Order ${req.params.orderId} not found`,
-          'ORDER_NOT_FOUND'
-        );
-        
-        next(notFoundError);
+        throw new ApplicationError(ErrorCodes.ORDER_NOT_FOUND, `Order ${req.params.orderId} not found`);
       } else {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        const serverError = createServerError(errorMessage || 'Failed to cancel order');
-        next(serverError);
+        throw new ApplicationError(ErrorCodes.INTERNAL_ERROR, 'Failed to cancel order');
       }
     }
   }
@@ -324,7 +270,7 @@ export class OrderController {
    * @returns Order key
    */
   private getOrderKey(orderRequest: any): string {
-    return `${orderRequest.symbol}_${orderRequest.side}_${orderRequest.orderType}_${orderRequest.qty}`;
+    return `${orderRequest.symbol}_${orderRequest.side}_${orderRequest.type}_${orderRequest.qty}`;
   }
   
   /**

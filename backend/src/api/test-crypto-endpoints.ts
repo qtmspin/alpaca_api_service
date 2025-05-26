@@ -22,8 +22,9 @@ async function testCryptoSnapshots() {
       }
     });
     console.log('Crypto snapshots response:', JSON.stringify(response.data, null, 2));
-  } catch (error) {
-    console.error('Error testing crypto snapshots:', error.response?.data || error.message);
+  } catch (error: unknown) {
+    const errorResponse = error as { response?: { data: any }; message?: string };
+    console.error('Error testing crypto snapshots:', errorResponse.response?.data || (error instanceof Error ? error.message : 'Unknown error'));
   }
 }
 
@@ -44,8 +45,9 @@ async function testCryptoBars() {
       }
     });
     console.log('Crypto bars response:', JSON.stringify(response.data, null, 2));
-  } catch (error) {
-    console.error('Error testing crypto bars:', error.response?.data || error.message);
+  } catch (error: unknown) {
+    const errorResponse = error as { response?: { data: any }; message?: string };
+    console.error('Error testing crypto bars:', errorResponse.response?.data || (error instanceof Error ? error.message : 'Unknown error'));
   }
 }
 
@@ -72,8 +74,9 @@ async function testStockBars() {
       }
     });
     console.log('Stock bars response:', JSON.stringify(response.data, null, 2));
-  } catch (error) {
-    console.error('Error testing stock bars:', error.response?.data || error.message);
+  } catch (error: unknown) {
+    const errorResponse = error as { response?: { data: any }; message?: string };
+    console.error('Error testing stock bars:', errorResponse.response?.data || (error instanceof Error ? error.message : 'Unknown error'));
   }
 }
 
@@ -85,8 +88,9 @@ async function testBackendEndpoints() {
     console.log('Testing backend crypto market data...');
     const cryptoResponse = await axios.get('http://localhost:9000/api/alpaca/market-data/BTC/USD');
     console.log('Backend crypto response:', JSON.stringify(cryptoResponse.data, null, 2));
-  } catch (error) {
-    console.error('Error testing backend crypto endpoint:', error.response?.data || error.message);
+  } catch (error: unknown) {
+    const errorResponse = error as { response?: { data: any }; message?: string };
+    console.error('Error testing backend crypto endpoint:', errorResponse.response?.data || (error instanceof Error ? error.message : 'Unknown error'));
   }
 
   try {
@@ -94,8 +98,9 @@ async function testBackendEndpoints() {
     console.log('\nTesting backend stock market data...');
     const stockResponse = await axios.get('http://localhost:9000/api/alpaca/market-data/AAPL');
     console.log('Backend stock response:', JSON.stringify(stockResponse.data, null, 2));
-  } catch (error) {
-    console.error('Error testing backend stock endpoint:', error.response?.data || error.message);
+  } catch (error: unknown) {
+    const errorResponse = error as { response?: { data: any }; message?: string };
+    console.error('Error testing backend stock endpoint:', errorResponse.response?.data || (error instanceof Error ? error.message : 'Unknown error'));
   }
 
   try {
@@ -112,8 +117,9 @@ async function testBackendEndpoints() {
       }
     });
     console.log('Backend crypto price history response:', JSON.stringify(priceHistoryResponse.data, null, 2));
-  } catch (error) {
-    console.error('Error testing backend crypto price history:', error.response?.data || error.message);
+  } catch (error: unknown) {
+    const errorResponse = error as { response?: { data: any }; message?: string };
+    console.error('Error testing backend crypto price history:', errorResponse.response?.data || (error instanceof Error ? error.message : 'Unknown error'));
   }
 }
 

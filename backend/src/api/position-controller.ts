@@ -11,7 +11,7 @@
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
-import { ApiError } from '../core/errors';
+import { AppError, ApplicationError } from '../core/errors.js';
 
 /**
  * PositionController class
@@ -56,9 +56,7 @@ export class PositionController {
       res.json(positions);
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      const serverError = new Error(errorMessage || 'Failed to get positions') as ApiError;
-      serverError.statusCode = 500;
-      serverError.code = 'SERVER_ERROR';
+      const serverError = new ApplicationError('SERVER_ERROR', errorMessage || 'Failed to get positions');
       
       next(serverError);
     }
@@ -76,9 +74,7 @@ export class PositionController {
       const position = await this.alpacaClient.getPosition(symbol);
       
       if (!position) {
-        const notFoundError = new Error(`Position not found for symbol: ${symbol}`) as ApiError;
-        notFoundError.statusCode = 404;
-        notFoundError.code = 'POSITION_NOT_FOUND';
+        const notFoundError = new ApplicationError('POSITION_NOT_FOUND', `Position not found for symbol: ${symbol}`);
         
         next(notFoundError);
         return;
@@ -91,18 +87,14 @@ export class PositionController {
         (error as any)?.statusCode === 404 || 
         ((error as any)?.response && (error as any).response.statusCode === 404)
       ) {
-        const notFoundError = new Error(`Position not found for symbol: ${req.params.symbol}`) as ApiError;
-        notFoundError.statusCode = 404;
-        notFoundError.code = 'POSITION_NOT_FOUND';
+        const notFoundError = new ApplicationError('POSITION_NOT_FOUND', `Position not found for symbol: ${req.params.symbol}`);
         
         next(notFoundError);
         return;
       }
       
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      const serverError = new Error(errorMessage || `Failed to get position for ${req.params.symbol}`) as ApiError;
-      serverError.statusCode = 500;
-      serverError.code = 'SERVER_ERROR';
+      const serverError = new ApplicationError('SERVER_ERROR', errorMessage || `Failed to get position for ${req.params.symbol}`);
       
       next(serverError);
     }  
@@ -125,18 +117,14 @@ export class PositionController {
         (error as any)?.statusCode === 404 || 
         ((error as any)?.response && (error as any).response.statusCode === 404)
       ) {
-        const notFoundError = new Error(`Position not found for symbol: ${req.params.symbol}`) as ApiError;
-        notFoundError.statusCode = 404;
-        notFoundError.code = 'POSITION_NOT_FOUND';
+        const notFoundError = new ApplicationError('POSITION_NOT_FOUND', `Position not found for symbol: ${req.params.symbol}`);
         
         next(notFoundError);
         return;
       }
       
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      const serverError = new Error(errorMessage || `Failed to close position for ${req.params.symbol}`) as ApiError;
-      serverError.statusCode = 500;
-      serverError.code = 'SERVER_ERROR';
+      const serverError = new ApplicationError('SERVER_ERROR', errorMessage || `Failed to close position for ${req.params.symbol}`);
       
       next(serverError);
     }  

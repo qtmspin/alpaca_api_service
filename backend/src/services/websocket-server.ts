@@ -12,8 +12,8 @@
  */
 
 import { Server as HttpServer } from 'http';
-import WebSocket from 'ws';
-import { ArtificialOrderManager } from '../core';
+import WebSocket, { WebSocketServer as WSServer } from 'ws';
+import { ArtificialOrderManager } from '../core/index.js';
 
 /**
  * WebSocketServer class
@@ -21,7 +21,7 @@ import { ArtificialOrderManager } from '../core';
  * Manages WebSocket connections and broadcasts real-time updates.
  */
 export class WebSocketServer {
-  private wss: WebSocket.Server;
+  private wss: WSServer;
   private subscriptions: Map<WebSocket, Set<string>> = new Map();
   private liveStreamIntervals: Map<string, NodeJS.Timeout> = new Map();
   
@@ -37,7 +37,7 @@ export class WebSocketServer {
     private orderManager: ArtificialOrderManager
   ) {
     // Create WebSocket server
-    this.wss = new WebSocket.Server({ server });
+    this.wss = new WSServer({ server });
     
     // Set up event handlers
     this.setupEventHandlers();

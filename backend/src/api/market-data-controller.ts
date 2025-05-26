@@ -10,7 +10,7 @@
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
-import { ApiError } from '../core/errors';
+import { AppError, ApplicationError } from '../core/errors.js';
 
 /**
  * MarketDataController class
@@ -53,9 +53,7 @@ export class MarketDataController {
       res.json(quote);
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      const serverError = new Error(errorMessage || `Failed to get quote for ${req.params.symbol}`) as ApiError;
-      serverError.statusCode = 500;
-      serverError.code = 'SERVER_ERROR';
+      const serverError = new ApplicationError('SERVER_ERROR', errorMessage || `Failed to get quote for ${req.params.symbol}`);
       
       next(serverError);
     }
@@ -80,9 +78,7 @@ export class MarketDataController {
       // Validate timeframe
       const validTimeframes = ['1Min', '5Min', '15Min', '1H', '1D'];
       if (!validTimeframes.includes(timeframe)) {
-        const validationError = new Error(`Invalid timeframe: ${timeframe}. Valid values are: ${validTimeframes.join(', ')}`) as ApiError;
-        validationError.statusCode = 400;
-        validationError.code = 'INVALID_TIMEFRAME';
+        const validationError = new ApplicationError('INVALID_TIMEFRAME', `Invalid timeframe: ${timeframe}. Valid values are: ${validTimeframes.join(', ')}`);
         
         next(validationError);
         return;
@@ -92,9 +88,7 @@ export class MarketDataController {
       res.json(bars);
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      const serverError = new Error(errorMessage || `Failed to get bars for ${req.params.symbol}`) as ApiError;
-      serverError.statusCode = 500;
-      serverError.code = 'SERVER_ERROR';
+      const serverError = new ApplicationError('SERVER_ERROR', errorMessage || `Failed to get bars for ${req.params.symbol}`);
       
       next(serverError);
     }

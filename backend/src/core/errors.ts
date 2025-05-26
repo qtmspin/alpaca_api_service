@@ -10,7 +10,18 @@
  * - Export error types for consistent error handling
  */
 
-import { AppError, ValidationError } from './schemas';
+// Define our own error interfaces to avoid runtime import issues
+export interface AppError {
+  code: string;
+  message: string;
+  details?: any;
+  timestamp: string;
+}
+
+export interface ValidationError extends AppError {
+  field: string;
+  value: any;
+}
 
 /**
  * Base application error class
@@ -333,8 +344,4 @@ export function createServerError(message: string, details?: any): ApplicationEr
   return new ApplicationError('INTERNAL_ERROR', message, details);
 }
 
-// Export all error types
-export {
-  AppError,
-  ValidationError
-} from './schemas';
+// End of file

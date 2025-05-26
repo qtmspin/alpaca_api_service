@@ -1,4 +1,3 @@
-"use strict";
 /**
  * account-controller.ts
  *
@@ -9,22 +8,21 @@
  * - Handle API endpoints for account information
  * - Get account details and balance information
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.AccountController = void 0;
-const express_1 = require("express");
+import { Router } from 'express';
+import { ApplicationError } from '../core/errors.js';
 /**
  * AccountController class
  *
  * Handles API endpoints for account management.
  */
-class AccountController {
+export class AccountController {
     /**
      * Constructor for AccountController
      * @param alpacaClient - Alpaca client instance
      */
     constructor(alpacaClient) {
         this.alpacaClient = alpacaClient;
-        this.router = (0, express_1.Router)();
+        this.router = Router();
         this.setupRoutes();
     }
     /**
@@ -47,9 +45,7 @@ class AccountController {
         }
         catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            const serverError = new Error(errorMessage || 'Failed to get account information');
-            serverError.statusCode = 500;
-            serverError.code = 'SERVER_ERROR';
+            const serverError = new ApplicationError('SERVER_ERROR', errorMessage || 'Failed to get account information');
             next(serverError);
         }
     }
@@ -61,4 +57,3 @@ class AccountController {
         return this.router;
     }
 }
-exports.AccountController = AccountController;

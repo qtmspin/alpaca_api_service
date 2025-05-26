@@ -859,7 +859,7 @@
                     "type": "string",
                     "description": "Alpaca API key (masked in responses)"
                   },
-                  "apiSecret": {
+                  "secretKey": {
                     "type": "string",
                     "description": "Alpaca API secret (masked in responses)"
                   },
@@ -977,7 +977,7 @@
                 "type": "object",
                 "properties": {
                   "apiKey": { "type": "string" },
-                  "apiSecret": { "type": "string" },
+                  "secretKey": { "type": "string" },
                   "paperTrading": { "type": "boolean" }
                 }
               },
