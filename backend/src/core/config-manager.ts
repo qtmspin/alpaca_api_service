@@ -1,160 +1,147 @@
 /**
  * config-manager.ts
  * 
- * This file contains the implementation for managing service configuration.
- * It handles loading, validating, and updating configuration settings.
+ * This file manages application configuration loading and validation.
  * Location: backend/src/core/config-manager.ts
  * 
  * Responsibilities:
- * - Load configuration from file or environment variables
+ * - Load configuration from JSON files
  * - Validate configuration using Zod schemas
- * - Provide methods to update runtime configuration
- * - Notify subscribers when configuration changes
+ * - Provide type-safe configuration access
+ * - Handle configuration updates
  */
 
 import fs from 'fs/promises';
 import path from 'path';
-import { ServiceConfigSchema, ServiceConfig, ConfigUpdateSchema } from './schemas';
+import { AppConfig, AppConfigSchema } from './schemas';
 
-type ConfigChangeListener = (config: ServiceConfig) => void;
-
-/**
- * ConfigManager class
- * 
- * Manages service configuration, including loading, validation, and updates.
- * Separates runtime settings (can be changed without restart) from startup settings.
- */
 export class ConfigManager {
-  private config: ServiceConfig;
   private configPath: string;
-  private listeners: ConfigChangeListener[] = [];
-  
-  /**
-   * Constructor for ConfigManager
-   * @param configPath - Path to the configuration file
-   */
+  private config: AppConfig | null = null;
+
   constructor(configPath: string) {
-    this.configPath = configPath;
-    
-    // Initialize with default values from schema
-    this.config = ServiceConfigSchema.parse({
-      runtime: {},
-      startup: {}
-    });
+    this.configPath = path.resolve(configPath);
   }
-  
+
   /**
    * Load configuration from file
-   * @returns Promise resolving to the loaded configuration
    */
-  public async loadConfig(): Promise<ServiceConfig> {
+  async loadConfig(): Promise<AppConfig> {
     try {
-      const configDir = path.dirname(this.configPath);
-      await fs.mkdir(configDir, { recursive: true });
+      // Check if config file exists
+      await fs.access(this.configPath);
       
-      const fileExists = await fs.access(this.configPath)
-        .then(() => true)
-        .catch(() => false);
+      // Read and parse config file
+      const configData = await fs.readFile(this.configPath, 'utf-8');
+      const rawConfig = JSON.parse(configData);
       
-      if (fileExists) {
-        const configData = await fs.readFile(this.configPath, 'utf-8');
-        const parsedConfig = JSON.parse(configData);
-        
-        // Validate and set defaults for any missing fields
-        this.config = ServiceConfigSchema.parse(parsedConfig);
-      } else {
-        // Create a new config file with defaults if it doesn't exist
-        await this.saveConfig();
+      // Validate configuration using Zod schema
+      const validatedConfig = AppConfigSchema.parse(rawConfig);
+      
+      this.config = validatedConfig;
+      return validatedConfig;
+      
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        throw new Error(`Configuration file not found: ${this.configPath}`);
       }
       
-      return this.config;
-    } catch (error: unknown) {
-      console.error('Error loading configuration:', error);
-      throw new Error(`Failed to load configuration: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(`Failed to load configuration: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  
+
   /**
-   * Save configuration to file
-   * @returns Promise resolving when the configuration is saved
+   * Get current configuration
    */
-  public async saveConfig(): Promise<void> {
-    try {
-      const configDir = path.dirname(this.configPath);
-      await fs.mkdir(configDir, { recursive: true });
-      
-      await fs.writeFile(
-        this.configPath,
-        JSON.stringify(this.config, null, 2),
-        'utf-8'
-      );
-    } catch (error: unknown) {
-      console.error('Error saving configuration:', error);
-      throw new Error(`Failed to save configuration: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  getConfig(): AppConfig {
+    if (!this.config) {
+      throw new Error('Configuration not loaded. Call loadConfig() first.');
     }
-  }
-  
-  /**
-   * Get the current configuration
-   * @returns The current service configuration
-   */
-  public getConfig(): ServiceConfig {
     return this.config;
   }
-  
+
   /**
-   * Update runtime configuration settings
-   * @param updates - Partial configuration updates
-   * @returns The updated configuration
+   * Save configuration to file
    */
-  public async updateRuntimeConfig(updates: Record<string, any>): Promise<ServiceConfig> {
+  async saveConfig(config: AppConfig): Promise<void> {
     try {
-      // Validate the updates against the schema
-      const validatedUpdates = ConfigUpdateSchema.parse(updates);
+      // Validate configuration
+      const validatedConfig = AppConfigSchema.parse(config);
       
-      // Only allow updating runtime settings
-      if (validatedUpdates.runtime) {
-        this.config = {
-          ...this.config,
-          runtime: {
-            ...this.config.runtime,
-            ...validatedUpdates.runtime
-          }
-        };
-        
-        // Save the updated configuration
-        await this.saveConfig();
-        
-        // Notify listeners of the change
-        this.notifyListeners();
-      }
+      // Ensure directory exists
+      const configDir = path.dirname(this.configPath);
+      await fs.mkdir(configDir, { recursive: true });
       
-      return this.config;
-    } catch (error: unknown) {
-      console.error('Error updating configuration:', error);
-      throw new Error(`Failed to update configuration: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      // Write configuration to file
+      await fs.writeFile(
+        this.configPath, 
+        JSON.stringify(validatedConfig, null, 2), 
+        'utf-8'
+      );
+      
+      this.config = validatedConfig;
+      
+    } catch (error) {
+      throw new Error(`Failed to save configuration: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  
+
   /**
-   * Subscribe to configuration changes
-   * @param listener - Function to call when configuration changes
-   * @returns Unsubscribe function
+   * Update specific configuration section
    */
-  public subscribe(listener: ConfigChangeListener): () => void {
-    this.listeners.push(listener);
+  async updateConfig(updates: Partial<AppConfig>): Promise<AppConfig> {
+    const currentConfig = this.getConfig();
+    const newConfig = { ...currentConfig, ...updates };
     
-    return () => {
-      this.listeners = this.listeners.filter(l => l !== listener);
-    };
+    await this.saveConfig(newConfig);
+    return newConfig;
   }
-  
+
   /**
-   * Notify all listeners of configuration changes
+   * Create default configuration file
    */
-  private notifyListeners(): void {
-    for (const listener of this.listeners) {
-      listener(this.config);
+  async createDefaultConfig(): Promise<AppConfig> {
+    const defaultConfig: AppConfig = {
+      startup: {
+        apiPort: 9000,
+        wsPort: 9001,
+        host: 'localhost'
+      },
+      runtime: {
+        alpaca: {
+          apiKey: process.env.ALPACA_API_KEY || '',
+          secretKey: process.env.ALPACA_SECRET_KEY || '',
+          isPaper: true,
+          baseUrl: 'https://paper-api.alpaca.markets'
+        },
+        monitoring: {
+          priceCheckIntervalMs: 5000,
+          maxRetries: 3,
+          retryDelayMs: 1000
+        }
+      }
+    };
+
+    await this.saveConfig(defaultConfig);
+    return defaultConfig;
+  }
+
+  /**
+   * Check if configuration file exists
+   */
+  async configExists(): Promise<boolean> {
+    try {
+      await fs.access(this.configPath);
+      return true;
+    } catch {
+      return false;
     }
+  }
+
+  /**
+   * Get configuration file path
+   */
+  getConfigPath(): string {
+    return this.configPath;
   }
 }

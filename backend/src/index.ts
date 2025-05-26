@@ -15,14 +15,17 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import { ConfigManager, ArtificialOrderManager } from './core';
+import { ConfigManager, ArtificialOrderManager } from './core/index';
 import { setupApiRoutes } from './api/routes';
 import { createAlpacaClient } from './services/alpaca-client';
 import { setupWebSocketServer } from './services/websocket-server';
 import path from 'path';
 
+// Use the current working directory for config path
+const currentDir = process.cwd();
+
 // Initialize configuration manager
-const configPath = path.join(__dirname, '../config/config.json');
+const configPath = path.join(currentDir, 'temp_config.json');
 const configManager = new ConfigManager(configPath);
 
 // Initialize Express app
@@ -40,8 +43,9 @@ async function initializeServer() {
     const config = await configManager.loadConfig();
     console.log('Configuration loaded successfully');
     
-    // Initialize Alpaca client
-    const alpacaClient = createAlpacaClient(config.runtime.alpaca);
+    // Initialize Alpaca client (now async)
+    console.log('Initializing Alpaca client...');
+    const alpacaClient = await createAlpacaClient(config.runtime.alpaca);
     console.log('Alpaca client initialized');
     
     // Initialize artificial order manager
@@ -70,6 +74,14 @@ async function initializeServer() {
     
   } catch (error) {
     console.error('Failed to initialize server:', error);
+    
+    // More detailed error logging
+    if (error instanceof Error) {
+      console.error('Error name:', error.name);
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+    }
+    
     process.exit(1);
   }
 }

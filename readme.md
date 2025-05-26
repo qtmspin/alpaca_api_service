@@ -17,6 +17,8 @@ A TypeScript service for interacting with the Alpaca API with enhanced features 
 - **Zustand**: [zustand](https://github.com/pmndrs/zustand) - State management
 - **Zod**: [zod](https://github.com/colinhacks/zod) - TypeScript-first schema validation
 - **Tailwind CSS**: [tailwindcss.com](https://tailwindcss.com) - Utility-first CSS framework
+- **React**: [reactjs.org](https://reactjs.org) - Frontend framework
+- **Flexlayout**: [flexlayout.io](https://flexlayout.io) - Layout engine
 
 ## 🎯 Core Philosophy
 

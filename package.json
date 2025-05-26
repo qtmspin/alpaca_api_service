@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "@alpacahq/typescript-sdk": "^0.0.31-preview",
+    "recharts": "^2.15.3"
+  }
+}

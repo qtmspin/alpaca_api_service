@@ -1,645 +1,362 @@
 /**
  * alpaca-client.ts
  * 
- * This file contains the client service for interacting with the Alpaca API.
- * Location: backend/src/services/alpaca-client.ts
- * 
- * Responsibilities:
- * - Provide methods for interacting with the Alpaca API using the official TypeScript SDK
- * - Handle API requests and responses
- * - Format data for the frontend
- * - Manage error handling and rate limiting
+ * Service for interacting with the Alpaca Trading API
+ * Fixed to handle module import issues
  */
 
-// Import the SDK using dynamic import to handle ESM modules
-// We'll initialize this in the constructor
-let createClient: any;
+import { AlpacaConfig } from '../core';
+import axios from 'axios';
 
-/**
- * Configuration interface for Alpaca client
- */
-export interface AlpacaConfig {
-  apiKey: string;
-  apiSecret: string;
-  paperTrading?: boolean;
-}
+// Dynamic import to handle ES module
+let alpacaSDK: any = null;
 
-/**
- * Order parameters interface
- */
-export interface OrderParams {
-  symbol: string;
-  qty: string | number;
-  side: 'buy' | 'sell';
-  orderType: 'market' | 'limit' | 'stop' | 'stop_limit';
-  timeInForce: 'day' | 'gtc' | 'opg' | 'cls' | 'ioc' | 'fok';
-  limitPrice?: number | string;
-  stopPrice?: number | string;
-  clientOrderId?: string;
-  extendedHours?: boolean;
-}
-
-/**
- * Standardized order response interface
- */
-export interface OrderResponse {
-  orderId: string;
-  clientOrderId?: string;
-  symbol: string;
-  side: string;
-  orderType: string;
-  timeInForce: string;
-  qty: number;
-  filledQty: number;
-  limitPrice?: number;
-  stopPrice?: number;
-  status: string;
-  createdAt: string;
-  updatedAt: string;
-  submittedAt?: string;
-  filledAt?: string;
-  expiredAt?: string;
-  canceledAt?: string;
-  filledAvgPrice?: number;
-}
-
-/**
- * Position response interface
- */
-export interface PositionResponse {
-  symbol: string;
-  qty: number;
-  avgEntryPrice: number;
-  side: string;
-  marketValue: number;
-  costBasis: number;
-  unrealizedPl: number;
-  unrealizedPlpc: number;
-  currentPrice: number;
-  lastdayPrice: number;
-  changeToday: number;
-}
-
-/**
- * Account response interface
- */
-export interface AccountResponse {
-  accountNumber: string;
-  status: string;
-  currency: string;
-  buyingPower: number;
-  cash: number;
-  portfolioValue: number;
-  patternDayTrader: boolean;
-  tradingBlocked: boolean;
-  transfersBlocked: boolean;
-  accountBlocked: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/**
- * Quote response interface
- */
-export interface QuoteResponse {
-  symbol: string;
-  bidPrice: number;
-  bidSize: number;
-  askPrice: number;
-  askSize: number;
-  timestamp: string;
-  latestPrice: number;
-}
-
-/**
- * Bar response interface
- */
-export interface BarResponse {
-  symbol: string;
-  timestamp: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-}
-
-/**
- * Helper function to safely convert a value to a number
- */
-function safeToNumber(value: any, defaultValue: number = 0): number {
-  if (value === null || value === undefined) return defaultValue;
-  const num = typeof value === 'string' ? parseFloat(value) : Number(value);
-  return isNaN(num) ? defaultValue : num;
-}
-
-/**
- * Helper function to safely convert a value to a string
- */
-function safeToString(value: any): string | undefined {
-  if (value === null || value === undefined) return undefined;
-  return String(value);
-}
-
-/**
- * AlpacaClient class
- * 
- * Provides methods for interacting with the Alpaca API using the official TypeScript SDK.
- */
-export class AlpacaClient {
-  private client: any; // Using any type to avoid strict typing issues with the preview SDK
-  
-  /**
-   * Constructor for AlpacaClient
-   * @param config - Alpaca API configuration
-   */
-  constructor(private config: AlpacaConfig) {
-    // Initialize the client asynchronously
-    this.initClient();
-  }
-
-  /**
-   * Initialize the Alpaca client asynchronously
-   * This handles the dynamic import of the ESM module
-   */
-  /**
-   * Ensure the client is initialized before making API calls
-   * @returns The initialized client
-   */
-  private async ensureClient(): Promise<any> {
-    if (!this.client) {
-      await this.initClient();
-    }
-    if (!this.client) {
-      throw new Error('Alpaca client failed to initialize');
-    }
-    return this.client;
-  }
-
-  /**
-   * Initialize the Alpaca client asynchronously
-   * This handles the dynamic import of the ESM module
-   */
-  private async initClient(): Promise<void> {
+async function loadAlpacaSDK() {
+  if (!alpacaSDK) {
     try {
-      // Dynamically import the SDK
-      const alpacaSdk = await import('@alpacahq/typescript-sdk');
-      createClient = alpacaSdk.createClient;
+      // Try ESM import first
+      alpacaSDK = await import('@alpacahq/typescript-sdk');
+    } catch (error) {
+      console.error('Failed to load Alpaca SDK via ESM import:', error);
+      throw error;
+    }
+  }
+  return alpacaSDK;
+}
+
+export interface AlpacaClientInterface {
+  // Account methods
+  getAccount(): Promise<any>;
+  
+  // Order methods
+  createOrder(orderData: any): Promise<any>;
+  getOrder(orderId: string): Promise<any>;
+  getOrders(params?: any): Promise<any>;
+  cancelOrder(orderId: string): Promise<any>;
+  replaceOrder(orderId: string, updateData: any): Promise<any>;
+  
+  // Position methods
+  getPositions(): Promise<any>;
+  getPosition(symbol: string): Promise<any>;
+  closePosition(symbol: string): Promise<any>;
+  
+  // Asset methods
+  getAssets(params?: any): Promise<any>;
+  getAsset(symbol: string): Promise<any>;
+  
+  // Market data methods
+  getStocksBarsLatest(symbols: string[]): Promise<any>;
+  getStocksQuotesLatest(symbols: string[]): Promise<any>;
+  getStocksTrades(symbols: string[], params?: any): Promise<any>;
+  
+  // Crypto data methods
+  getCryptoBarsLatest(symbols: string[]): Promise<any>;
+  getCryptoBars(symbol: string, timeframe: string, start: string, end?: string, limit?: number): Promise<any>;
+  
+  // Price history methods
+  getStockBars(symbol: string, timeframe: string, start: string, end?: string, limit?: number): Promise<any>;
+  
+  // Market info methods
+  getClock(): Promise<any>;
+  getCalendar(params?: any): Promise<any>;
+  
+  // Portfolio methods
+  getPortfolioHistory(params?: any): Promise<any>;
+  
+  // Watchlist methods
+  getWatchlists(): Promise<any>;
+  createWatchlist(name: string, symbols: string[]): Promise<any>;
+  updateWatchlist(watchlistId: string, updates: any): Promise<any>;
+  deleteWatchlist(watchlistId: string): Promise<any>;
+}
+
+export class AlpacaClient implements AlpacaClientInterface {
+  private client: any = null;
+  private config: AlpacaConfig;
+
+  constructor(config: AlpacaConfig) {
+    this.config = config;
+  }
+
+  async initClient(): Promise<void> {
+    try {
+      const sdk = await loadAlpacaSDK();
       
-      this.client = createClient({
+      this.client = sdk.createClient({
         key: this.config.apiKey,
-        secret: this.config.apiSecret,
-        paper: this.config.paperTrading !== false, // Default to paper trading
+        secret: this.config.secretKey,
+        paper: this.config.isPaper,
         tokenBucket: {
-          capacity: 200, // Maximum number of tokens
-          fillRate: 60   // Tokens refilled per second
+          capacity: 200,
+          fillRate: 60, // requests per second
         }
       });
+
+      console.log('Alpaca client initialized successfully');
     } catch (error) {
       console.error('Failed to initialize Alpaca client:', error);
       throw new Error(`Failed to initialize Alpaca client: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  
+
+  public ensureClient(): void {
+    if (!this.client) {
+      throw new Error('Alpaca client not initialized. Call initClient() first.');
+    }
+  }
+
   /**
-   * Get account information
-   * @returns Promise resolving to account information
+   * Check if the Alpaca client is initialized
+   * @returns boolean indicating whether the client is initialized
    */
-  public async getAccount(): Promise<AccountResponse> {
+  public isInitialized(): boolean {
+    return this.client !== null;
+  }
+
+  // Account methods
+  async getAccount(): Promise<any> {
+    this.ensureClient();
+    return await this.client.getAccount();
+  }
+
+  // Order methods
+  async createOrder(orderData: any): Promise<any> {
+    this.ensureClient();
+    return await this.client.createOrder(orderData);
+  }
+
+  async getOrder(orderId: string): Promise<any> {
+    this.ensureClient();
+    return await this.client.getOrder({ order_id: orderId });
+  }
+
+  async getOrders(params: any = {}): Promise<any> {
+    this.ensureClient();
+    return await this.client.getOrders(params);
+  }
+
+  async cancelOrder(orderId: string): Promise<any> {
+    this.ensureClient();
+    return await this.client.cancelOrder({ order_id: orderId });
+  }
+
+  async replaceOrder(orderId: string, updateData: any): Promise<any> {
+    this.ensureClient();
+    return await this.client.replaceOrder({ 
+      order_id: orderId, 
+      ...updateData 
+    });
+  }
+
+  // Position methods
+  async getPositions(): Promise<any> {
+    this.ensureClient();
+    return await this.client.getPositions();
+  }
+
+  async getPosition(symbol: string): Promise<any> {
+    this.ensureClient();
+    return await this.client.getPosition({ symbol_or_asset_id: symbol });
+  }
+
+  async closePosition(symbol: string): Promise<any> {
+    this.ensureClient();
+    return await this.client.closePosition({ symbol_or_asset_id: symbol });
+  }
+
+  // Asset methods
+  async getAssets(params: any = {}): Promise<any> {
+    this.ensureClient();
+    return await this.client.getAssets(params);
+  }
+
+  async getAsset(symbol: string): Promise<any> {
+    this.ensureClient();
+    return await this.client.getAsset({ symbol_or_asset_id: symbol });
+  }
+
+  // Market data methods
+  async getStocksBarsLatest(symbols: string[]): Promise<any> {
+    this.ensureClient();
+    return await this.client.getStocksBarsLatest({
+      symbols: symbols.join(',')
+    });
+  }
+
+  async getStocksQuotesLatest(symbols: string[]): Promise<any> {
+    this.ensureClient();
+    return await this.client.getStocksQuotesLatest({
+      symbols: symbols.join(',')
+    });
+  }
+
+  async getStocksTrades(symbols: string[], params: any = {}): Promise<any> {
+    this.ensureClient();
+    return await this.client.getStocksTrades({
+      symbols: symbols.join(','),
+      ...params
+    });
+  }
+  
+  // Crypto data methods using direct API calls
+  async getCryptoBarsLatest(symbols: string[]): Promise<any> {
+    this.ensureClient();
     try {
-      const client = await this.ensureClient();
-      const account = await client.getAccount();
-      
-      return {
-        accountNumber: account.account_number || '',
-        status: account.status || 'UNKNOWN',
-        currency: account.currency || 'USD',
-        buyingPower: safeToNumber(account.buying_power),
-        cash: safeToNumber(account.cash),
-        portfolioValue: safeToNumber(account.portfolio_value),
-        patternDayTrader: Boolean(account.pattern_day_trader),
-        tradingBlocked: Boolean(account.trading_blocked),
-        transfersBlocked: Boolean(account.transfers_blocked),
-        accountBlocked: Boolean(account.account_blocked),
-        createdAt: account.created_at || new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-    } catch (error: unknown) {
-      console.error('Error getting account information:', error);
-      throw this.handleApiError(error, 'Failed to get account information');
+      // Use direct API call for crypto data
+      const response = await axios.get(`https://data.alpaca.markets/v1beta3/crypto/us/snapshots`, {
+        params: { symbols: symbols.join(',') },
+        headers: {
+          'APCA-API-KEY-ID': this.config.apiKey,
+          'APCA-API-SECRET-KEY': this.config.secretKey,
+          'Accept': 'application/json'
+        }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching crypto bars latest:', error);
+      throw error;
     }
   }
   
-  /**
-   * Get all positions
-   * @returns Promise resolving to array of positions
-   */
-  public async getPositions(): Promise<PositionResponse[]> {
+  async getCryptoBars(symbol: string, timeframe: string, start: string, end?: string, limit?: number): Promise<any> {
+    this.ensureClient();
     try {
-      const client = await this.ensureClient();
-      const positions = await client.getPositions();
-      
-      return positions.map((position: any) => ({
-        symbol: position.symbol || '',
-        qty: safeToNumber(position.qty),
-        avgEntryPrice: safeToNumber(position.avg_entry_price),
-        side: safeToNumber(position.qty) >= 0 ? 'long' : 'short',
-        marketValue: safeToNumber(position.market_value),
-        costBasis: safeToNumber(position.cost_basis),
-        unrealizedPl: safeToNumber(position.unrealized_pl),
-        unrealizedPlpc: safeToNumber(position.unrealized_plpc),
-        currentPrice: safeToNumber(position.current_price),
-        lastdayPrice: safeToNumber(position.lastday_price),
-        changeToday: safeToNumber(position.change_today)
-      }));
-    } catch (error: unknown) {
-      console.error('Error getting positions:', error);
-      throw this.handleApiError(error, 'Failed to get positions');
-    }
-  }
-  
-  /**
-   * Get position by symbol
-   * @param symbol - Stock symbol
-   * @returns Promise resolving to position information
-   */
-  public async getPosition(symbol: string): Promise<PositionResponse> {
-    try {
-      const client = await this.ensureClient();
-      // Use symbol_or_asset_id as the parameter name per SDK documentation
-      const position = await client.getPosition({ symbol_or_asset_id: symbol });
-      
-      return {
-        symbol: position.symbol || symbol,
-        qty: safeToNumber(position.qty),
-        avgEntryPrice: safeToNumber(position.avg_entry_price),
-        side: safeToNumber(position.qty) >= 0 ? 'long' : 'short',
-        marketValue: safeToNumber(position.market_value),
-        costBasis: safeToNumber(position.cost_basis),
-        unrealizedPl: safeToNumber(position.unrealized_pl),
-        unrealizedPlpc: safeToNumber(position.unrealized_plpc),
-        currentPrice: safeToNumber(position.current_price),
-        lastdayPrice: safeToNumber(position.lastday_price),
-        changeToday: safeToNumber(position.change_today)
-      };
-    } catch (error: any) {
-      // Handle 404 error specifically
-      if (error?.status === 404 || error?.response?.status === 404) {
-        const notFoundError = new Error(`No position found for symbol ${symbol}`);
-        (notFoundError as any).statusCode = 404;
-        throw notFoundError;
-      }
-      console.error(`Error getting position for ${symbol}:`, error);
-      throw this.handleApiError(error, `Failed to get position for ${symbol}`);
-    }
-  }
-  
-  /**
-   * Create a new order
-   * @param params - Order parameters
-   * @returns Promise resolving to order information
-   */
-  public async createOrder(params: OrderParams): Promise<OrderResponse> {
-    try {
-      const client = await this.ensureClient();
-      // Convert parameters to the format expected by the SDK
-      const orderParams = {
-        symbol: params.symbol,
-        qty: params.qty,
-        side: params.side,
-        type: params.orderType,
-        time_in_force: params.timeInForce,
-        limit_price: params.limitPrice,
-        stop_price: params.stopPrice,
-        client_order_id: params.clientOrderId,
-        extended_hours: params.extendedHours
-      };
-      
-      const order = await client.createOrder(orderParams);
-      
-      return this.formatOrderResponse(order);
-    } catch (error: unknown) {
-      console.error('Error creating order:', error);
-      throw this.handleApiError(error, 'Failed to create order');
-    }
-  }
-  
-  /**
-   * Get an order by ID
-   * @param orderId - Order ID
-   * @returns Promise resolving to order information
-   */
-  public async getOrder(orderId: string): Promise<OrderResponse> {
-    try {
-      const client = await this.ensureClient();
-      const order = await client.getOrder({ order_id: orderId });
-      return this.formatOrderResponse(order);
-    } catch (error: any) {
-      if (error?.status === 404 || error?.response?.status === 404) {
-        const notFoundError = new Error(`Order ${orderId} not found`);
-        (notFoundError as any).statusCode = 404;
-        throw notFoundError;
-      }
-      console.error(`Error getting order ${orderId}:`, error);
-      throw this.handleApiError(error, `Failed to get order ${orderId}`);
-    }
-  }
-  
-  /**
-   * Get orders
-   * @param status - Order status filter
-   * @param limit - Maximum number of orders to return
-   * @returns Promise resolving to array of orders
-   */
-  public async getOrders(status: string = 'open', limit: number = 50): Promise<OrderResponse[]> {
-    try {
-      const client = await this.ensureClient();
-      const request: any = {
-        status: status,
-        limit,
-        direction: 'desc'
-      };
-      
-      const orders = await client.getOrders(request);
-      
-      // Handle both single order and array responses
-      const orderArray = Array.isArray(orders) ? orders : [orders];
-      return orderArray.map((order: any) => this.formatOrderResponse(order));
-    } catch (error: unknown) {
-      console.error('Error getting orders:', error);
-      throw this.handleApiError(error, 'Failed to get orders');
-    }
-  }
-  
-  /**
-   * Cancel an order
-   * @param orderId - Order ID
-   * @returns Promise resolving to canceled order status
-   */
-  public async cancelOrder(orderId: string): Promise<{ orderId: string; status: string }> {
-    try {
-      const client = await this.ensureClient();
-      await client.cancelOrder({ order_id: orderId });
-      
-      return {
-        orderId,
-        status: 'canceled'
-      };
-    } catch (error: any) {
-      if (error?.status === 404 || error?.response?.status === 404) {
-        const notFoundError = new Error(`Order ${orderId} not found`);
-        (notFoundError as any).statusCode = 404;
-        throw notFoundError;
-      }
-      console.error(`Error canceling order ${orderId}:`, error);
-      throw this.handleApiError(error, `Failed to cancel order ${orderId}`);
-    }
-  }
-  
-  /**
-   * Get current quote for a symbol
-   * @param symbol - Stock symbol
-   * @returns Promise resolving to quote information
-   */
-  public async getQuote(symbol: string): Promise<QuoteResponse> {
-    try {
-      const client = await this.ensureClient();
-      // Use the stocks quotes latest method from the TypeScript SDK
-      const response = await client.getStocksQuotesLatest({ symbols: symbol });
-      
-      // Extract the quote data - handle various response structures
-      let quote: any;
-      if (response.quotes && response.quotes[symbol]) {
-        quote = response.quotes[symbol];
-      } else if (response[symbol]) {
-        quote = response[symbol];
-      } else if (Array.isArray(response) && response.length > 0) {
-        quote = response[0];
-      } else {
-        quote = response;
-      }
-      
-      return {
-        symbol,
-        bidPrice: safeToNumber(quote.bp || quote.bid_price || quote.bidPrice),
-        bidSize: safeToNumber(quote.bs || quote.bid_size || quote.bidSize),
-        askPrice: safeToNumber(quote.ap || quote.ask_price || quote.askPrice),
-        askSize: safeToNumber(quote.as || quote.ask_size || quote.askSize),
-        timestamp: quote.t || quote.timestamp || new Date().toISOString(),
-        latestPrice: (safeToNumber(quote.bp || quote.bid_price || quote.bidPrice) + 
-                     safeToNumber(quote.ap || quote.ask_price || quote.askPrice)) / 2
-      };
-    } catch (error: unknown) {
-      console.error(`Error getting quote for ${symbol}:`, error);
-      throw this.handleApiError(error, `Failed to get quote for ${symbol}`);
-    }
-  }
-  
-  /**
-   * Get historical bars for a symbol
-   * @param symbol - Stock symbol
-   * @param timeframe - Timeframe for bars
-   * @param start - Start date
-   * @param end - End date
-   * @param limit - Maximum number of bars to return
-   * @returns Promise resolving to array of bars
-   */
-  public async getBars(
-    symbol: string, 
-    timeframe: string, 
-    start?: Date, 
-    end?: Date, 
-    limit?: number
-  ): Promise<BarResponse[]> {
-    try {
-      const client = await this.ensureClient();
-      const request: any = {
+      // Use direct API call for crypto bars
+      const params: any = {
         symbols: symbol,
-        timeframe,
-        limit: limit || 100
+        timeframe: timeframe,
+        start: start,
+        limit: limit || 1000,
+        sort: 'asc'
       };
       
-      if (start) request.start = start.toISOString();
-      if (end) request.end = end.toISOString();
+      if (end) params.end = end;
       
-      // Use the stocks bars method from the TypeScript SDK
-      const response = await client.getStocksBars(request);
-      
-      // Extract bars from the response structure
-      let bars: any[] = [];
-      if (response.bars && response.bars[symbol]) {
-        bars = response.bars[symbol];
-      } else if (response[symbol]) {
-        bars = response[symbol];
-      } else if (response.bars && Array.isArray(response.bars)) {
-        bars = response.bars;
-      } else if (Array.isArray(response)) {
-        bars = response;
-      }
-      
-      return bars.map((bar: any) => ({
-        symbol,
-        timestamp: bar.t || bar.timestamp || new Date().toISOString(),
-        open: safeToNumber(bar.o || bar.open),
-        high: safeToNumber(bar.h || bar.high),
-        low: safeToNumber(bar.l || bar.low),
-        close: safeToNumber(bar.c || bar.close),
-        volume: safeToNumber(bar.v || bar.volume)
-      }));
-    } catch (error: unknown) {
-      console.error(`Error getting bars for ${symbol}:`, error);
-      throw this.handleApiError(error, `Failed to get bars for ${symbol}`);
+      const response = await axios.get(`https://data.alpaca.markets/v1beta3/crypto/us/bars`, {
+        params,
+        headers: {
+          'APCA-API-KEY-ID': this.config.apiKey,
+          'APCA-API-SECRET-KEY': this.config.secretKey,
+          'Accept': 'application/json'
+        }
+      });
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching crypto bars for ${symbol}:`, error);
+      throw error;
     }
   }
   
-  /**
-   * Get assets available for trading
-   * @param status - Asset status filter
-   * @returns Promise resolving to array of assets
-   */
-  public async getAssets(status: string = 'active'): Promise<any[]> {
+  async getCryptoQuotes(symbol: string, start: string, end?: string, limit?: number): Promise<any> {
+    this.ensureClient();
     try {
-      const client = await this.ensureClient();
-      const assets = await client.getAssets({ status });
-      
-      return assets.map((asset: any) => ({
-        id: asset.id,
-        symbol: asset.symbol,
-        name: asset.name,
-        exchange: asset.exchange,
-        status: asset.status,
-        tradable: asset.tradable,
-        marginable: asset.marginable,
-        shortable: asset.shortable,
-        fractionable: asset.fractionable
-      }));
-    } catch (error: unknown) {
-      console.error('Error getting assets:', error);
-      throw this.handleApiError(error, 'Failed to get assets');
-    }
-  }
-  
-  /**
-   * Get asset by symbol
-   * @param symbol - Stock symbol
-   * @returns Promise resolving to asset information
-   */
-  public async getAsset(symbol: string): Promise<any> {
-    try {
-      const client = await this.ensureClient();
-      // Use symbol_or_asset_id as the parameter name per SDK documentation
-      const asset = await client.getAsset({ symbol_or_asset_id: symbol });
-      
-      return {
-        id: asset.id,
-        symbol: asset.symbol,
-        name: asset.name,
-        exchange: asset.exchange,
-        status: asset.status,
-        tradable: asset.tradable,
-        marginable: asset.marginable,
-        shortable: asset.shortable,
-        fractionable: asset.fractionable
+      // Use direct API call for crypto quotes
+      const params: any = {
+        symbols: symbol,
+        start: start,
+        limit: limit || 1000,
+        sort: 'asc'
       };
-    } catch (error: unknown) {
-      console.error(`Error getting asset ${symbol}:`, error);
-      throw this.handleApiError(error, `Failed to get asset ${symbol}`);
-    }
-  }
-  
-  /**
-   * Close a position
-   * @param symbol - Stock symbol
-   * @returns Promise resolving to closed position result
-   */
-  public async closePosition(symbol: string): Promise<{ symbol: string; side: string; qty: number; status: string }> {
-    try {
-      const client = await this.ensureClient();
-      // Use symbol_or_asset_id as the parameter name per SDK documentation
-      const result = await client.closePosition({ symbol_or_asset_id: symbol });
       
-      return {
-        symbol,
-        side: result.side || 'unknown',
-        qty: safeToNumber(result.qty),
-        status: 'closed'
+      if (end) params.end = end;
+      
+      const response = await axios.get(`https://data.alpaca.markets/v1beta3/crypto/us/quotes`, {
+        params,
+        headers: {
+          'APCA-API-KEY-ID': this.config.apiKey,
+          'APCA-API-SECRET-KEY': this.config.secretKey,
+          'Accept': 'application/json'
+        }
+      });
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching crypto quotes for ${symbol}:`, error);
+      throw error;
+    }
+  }
+  
+  // Price history methods using direct API calls
+  async getStockBars(symbol: string, timeframe: string, start: string, end?: string, limit?: number): Promise<any> {
+    this.ensureClient();
+    try {
+      // Use direct API call for stock bars
+      const params: any = {
+        symbols: symbol,
+        timeframe: timeframe,
+        start: start,
+        limit: limit || 1000,
+        adjustment: 'raw',
+        feed: 'sip',
+        sort: 'asc'
       };
-    } catch (error: any) {
-      if (error?.status === 404 || error?.response?.status === 404) {
-        const notFoundError = new Error(`Position not found for symbol ${symbol}`);
-        (notFoundError as any).statusCode = 404;
-        throw notFoundError;
-      }
-      console.error(`Error closing position for ${symbol}:`, error);
-      throw this.handleApiError(error, `Failed to close position for ${symbol}`);
+      
+      if (end) params.end = end;
+      
+      const response = await axios.get(`https://data.alpaca.markets/v2/stocks/bars`, {
+        params,
+        headers: {
+          'APCA-API-KEY-ID': this.config.apiKey,
+          'APCA-API-SECRET-KEY': this.config.secretKey,
+          'Accept': 'application/json'
+        }
+      });
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching stock bars for ${symbol}:`, error);
+      throw error;
     }
   }
-  
-  /**
-   * Format order response to standardized format
-   * @param order - Raw order object from Alpaca API
-   * @returns Formatted order response
-   */
-  private formatOrderResponse(order: any): OrderResponse {
-    return {
-      orderId: order.id || '',
-      clientOrderId: order.client_order_id,
-      symbol: order.symbol || '',
-      side: order.side || '',
-      orderType: order.type || order.order_type || '',
-      timeInForce: order.time_in_force || '',
-      qty: safeToNumber(order.qty),
-      filledQty: safeToNumber(order.filled_qty),
-      limitPrice: order.limit_price ? safeToNumber(order.limit_price) : undefined,
-      stopPrice: order.stop_price ? safeToNumber(order.stop_price) : undefined,
-      status: order.status || '',
-      createdAt: order.created_at || new Date().toISOString(),
-      updatedAt: order.updated_at || new Date().toISOString(),
-      submittedAt: order.submitted_at,
-      filledAt: order.filled_at,
-      expiredAt: order.expired_at,
-      canceledAt: order.canceled_at,
-      filledAvgPrice: order.filled_avg_price ? safeToNumber(order.filled_avg_price) : undefined
-    };
+
+  // Market info methods
+  async getClock(): Promise<any> {
+    this.ensureClient();
+    return await this.client.getClock();
   }
-  
-  /**
-   * Handle API errors consistently
-   * @param error - The error object
-   * @param message - Default error message
-   * @returns Formatted error
-   */
-  private handleApiError(error: any, message: string): Error {
-    // If it's already a handled error, just return it
-    if (error.statusCode) {
-      return error;
-    }
-    
-    // Create a new error with the original message if available
-    const errorMessage = error instanceof Error ? error.message : message;
-    const apiError = new Error(errorMessage);
-    
-    // Add status code if available
-    if (error?.status) {
-      (apiError as any).statusCode = error.status;
-    } else if (error?.response?.status) {
-      (apiError as any).statusCode = error.response.status;
-    } else {
-      (apiError as any).statusCode = 500;
-    }
-    
-    // Add error code if available
-    (apiError as any).code = error?.code || 'ALPACA_API_ERROR';
-    
-    return apiError;
+
+  async getCalendar(params: any = {}): Promise<any> {
+    this.ensureClient();
+    return await this.client.getCalendar(params);
+  }
+
+  // Portfolio methods
+  async getPortfolioHistory(params: any = {}): Promise<any> {
+    this.ensureClient();
+    return await this.client.getPortfolioHistory(params);
+  }
+
+  // Watchlist methods
+  async getWatchlists(): Promise<any> {
+    this.ensureClient();
+    return await this.client.getWatchlists();
+  }
+
+  async createWatchlist(name: string, symbols: string[]): Promise<any> {
+    this.ensureClient();
+    return await this.client.createWatchlist({
+      name,
+      symbols
+    });
+  }
+
+  async updateWatchlist(watchlistId: string, updates: any): Promise<any> {
+    this.ensureClient();
+    return await this.client.updateWatchlist({
+      watchlist_id: watchlistId,
+      ...updates
+    });
+  }
+
+  async deleteWatchlist(watchlistId: string): Promise<any> {
+    this.ensureClient();
+    return await this.client.deleteWatchlist({ watchlist_id: watchlistId });
   }
 }
 
 /**
- * Create an Alpaca client instance
- * @param config - Alpaca API configuration
- * @returns AlpacaClient instance
+ * Factory function to create and initialize an Alpaca client
  */
-export function createAlpacaClient(config: AlpacaConfig): AlpacaClient {
-  return new AlpacaClient(config);
+export async function createAlpacaClient(config: AlpacaConfig): Promise<AlpacaClient> {
+  const client = new AlpacaClient(config);
+  await client.initClient();
+  return client;
 }

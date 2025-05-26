@@ -145,8 +145,8 @@ export class WebSocketServer {
    * @param ws - WebSocket connection
    * @param data - Subscription data
    */
-  private handleSubscribe(ws: WebSocket, data: any): void {
-    const { symbols = [], dataTypes = [] } = data;
+  private async handleSubscribe(ws: WebSocket, data: any): Promise<void> {
+    const { symbols = [], dataTypes = [], channels = [] } = data;
     const clientSubscriptions = this.subscriptions.get(ws);
     
     if (!clientSubscriptions) return;
@@ -157,6 +157,50 @@ export class WebSocketServer {
         const subscription = `${dataType}:${symbol}`;
         clientSubscriptions.add(subscription);
       }
+      
+      // Add channel-based subscriptions (new format)
+      for (const channel of channels) {
+        const subscription = `${channel}:${symbol}`;
+        clientSubscriptions.add(subscription);
+      }
+    }
+    
+    // If market_data channel is requested, fetch initial data
+    if (channels.includes('market_data') && symbols.length > 0) {
+      try {
+        // Ensure Alpaca client is initialized
+        if (this.alpacaClient.isInitialized()) {
+          for (const symbol of symbols) {
+            try {
+              // Get latest bar, quote, and asset info
+              const [barData, quoteData, assetData] = await Promise.all([
+                this.alpacaClient.getStocksBarsLatest([symbol]),
+                this.alpacaClient.getStocksQuotesLatest([symbol]),
+                this.alpacaClient.getAsset(symbol)
+              ]);
+              
+              // Combine the data
+              const marketData = {
+                symbol,
+                bar: barData[symbol] || null,
+                quote: quoteData[symbol] || null,
+                asset: assetData || null,
+                timestamp: new Date().toISOString()
+              };
+              
+              // Send initial market data
+              this.sendMessage(ws, {
+                type: 'market_data',
+                payload: marketData
+              });
+            } catch (error) {
+              console.error(`Error fetching initial market data for ${symbol}:`, error);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error handling market data subscription:', error);
+      }
     }
     
     // Confirm subscription
@@ -165,6 +209,7 @@ export class WebSocketServer {
       data: {
         symbols,
         dataTypes,
+        channels,
         timestamp: new Date().toISOString()
       }
     });
@@ -176,7 +221,7 @@ export class WebSocketServer {
    * @param data - Unsubscribe data
    */
   private handleUnsubscribe(ws: WebSocket, data: any): void {
-    const { symbols = [], dataTypes = [] } = data;
+    const { symbols = [], dataTypes = [], channels = [] } = data;
     const clientSubscriptions = this.subscriptions.get(ws);
     
     if (!clientSubscriptions) return;
@@ -187,6 +232,12 @@ export class WebSocketServer {
         const subscription = `${dataType}:${symbol}`;
         clientSubscriptions.delete(subscription);
       }
+      
+      // Remove channel-based subscriptions (new format)
+      for (const channel of channels) {
+        const subscription = `${channel}:${symbol}`;
+        clientSubscriptions.delete(subscription);
+      }
     }
     
     // Confirm unsubscription
@@ -195,6 +246,7 @@ export class WebSocketServer {
       data: {
         symbols,
         dataTypes,
+        channels,
         timestamp: new Date().toISOString()
       }
     });
@@ -225,17 +277,39 @@ export class WebSocketServer {
         const clientSubscriptions = this.subscriptions.get(client);
         
         if (clientSubscriptions && clientSubscriptions.has(subscription)) {
-          this.sendMessage(client, {
-            type,
-            data: {
-              ...data,
-              symbol,
-              timestamp: new Date().toISOString()
-            }
-          });
+          // Special handling for market data
+          if (type === 'market_data') {
+            this.sendMessage(client, {
+              type,
+              payload: {
+                ...data,
+                symbol,
+                timestamp: new Date().toISOString()
+              }
+            });
+          } else {
+            // Standard format for other data types
+            this.sendMessage(client, {
+              type,
+              data: {
+                ...data,
+                symbol,
+                timestamp: new Date().toISOString()
+              }
+            });
+          }
         }
       }
     });
+  }
+
+  /**
+   * Broadcast market data update to all subscribed clients
+   * @param symbol - Stock symbol
+   * @param marketData - Market data to broadcast
+   */
+  public broadcastMarketData(symbol: string, marketData: any): void {
+    this.broadcast('market_data', symbol, marketData);
   }
   
   /**

@@ -1,48 +1,57 @@
 {
   "name": "alpaca-api-service-backend",
   "version": "1.0.0",
-  "description": "Backend service for Alpaca API integration with artificial order management",
+  "description": "Backend service for Alpaca API integration",
+  "keywords": [
+    "alpaca",
+    "alpaca.markets",
+    "alpaca api",
+    "alpaca sdk",
+    "alpaca typescript",
+    "alpaca websocket",
+    "alpaca rest",
+    "alpaca trading",
+    "alpaca trading api",
+    "alpaca trading sdk",
+    "alpaca trading typescript",
+    "alpaca trading websocket",
+    "alpaca trading rest",
+    "alpaca markets",
+    "alpaca markets api",
+    "alpaca markets sdk",
+    "alpaca markets typescript",
+    "alpaca markets websocket",
+    "alpaca markets rest"
+  ],
+  "author": "117",
+  "license": "MIT",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
-    "watch": "ts-node --watch src/index.ts",
-    "test": "jest",
-    "lint": "eslint src/**/*.ts",
-    "lint:fix": "eslint src/**/*.ts --fix",
-    "setup": "node scripts/setup"
+    "dev": "tsx watch src/index.ts",
+    "lint": "eslint . --ext .ts",
+    "test": "jest"
   },
   "dependencies": {
-    "@alpacahq/typescript-sdk": "^0.0.31-preview",
-    "express": "^4.18.2",
+    "@deno/shim-deno": "~0.18.0",
+    "axios": "^1.9.0",
     "cors": "^2.8.5",
+    "express": "^4.18.2",
     "helmet": "^7.1.0",
+    "uuid": "^11.1.0",
     "ws": "^8.14.2",
-    "zod": "^3.22.4",
-    "uuid": "^9.0.1"
+    "zod": "^3.22.4"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
     "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.9.0",
+    "@types/uuid": "^10.0.0",
     "@types/ws": "^8.5.10",
-    "@types/uuid": "^9.0.7",
-    "@types/node": "^20.10.5",
-    "typescript": "^5.3.3",
-    "ts-node": "^10.9.2",
-    "jest": "^29.7.0",
-    "@types/jest": "^29.5.8",
-    "eslint": "^8.56.0",
-    "@typescript-eslint/eslint-plugin": "^6.15.0",
-    "@typescript-eslint/parser": "^6.15.0"
-  },
-  "keywords": [
-    "alpaca",
-    "trading",
-    "api",
-    "typescript",
-    "express"
-  ],
-  "author": "Your Name",
-  "license": "MIT"
+    "ts-node-dev": "^2.0.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.3.3"
+  }
 }
