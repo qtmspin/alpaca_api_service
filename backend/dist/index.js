@@ -19,13 +19,15 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const helmet_1 = __importDefault(require("helmet"));
+const promises_1 = __importDefault(require("fs/promises"));
+const path_1 = __importDefault(require("path"));
 const core_1 = require("./core");
 const routes_1 = require("./api/routes");
 const alpaca_client_1 = require("./services/alpaca-client");
 const websocket_server_1 = require("./services/websocket-server");
-const path_1 = __importDefault(require("path"));
 // Initialize configuration manager
-const configPath = path_1.default.join(__dirname, '../config/config.json');
+const configPath = path_1.default.resolve(process.cwd(), 'config/config.json');
+console.log(`Initializing configuration manager with path: ${configPath}`);
 const configManager = new core_1.ConfigManager(configPath);
 // Initialize Express app
 const app = (0, express_1.default)();
@@ -35,10 +37,23 @@ app.use((0, cors_1.default)());
 app.use(express_1.default.json());
 // Load configuration
 async function initializeServer() {
+    let config;
     try {
-        // Load configuration
-        const config = await configManager.loadConfig();
-        console.log('Configuration loaded successfully');
+        console.log('Starting server initialization...');
+        // Verify config file exists and is readable
+        try {
+            await promises_1.default.access(configPath);
+            console.log('Config file exists and is accessible');
+            const configContent = await promises_1.default.readFile(configPath, 'utf-8');
+            console.log('Config file content:', configContent);
+            // Load and validate configuration
+            config = await configManager.loadConfig();
+            console.log('Configuration loaded successfully');
+        }
+        catch (error) {
+            console.error('Error accessing or reading config file:', error);
+            throw new Error(`Failed to load configuration: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
         // Initialize Alpaca client
         const alpacaClient = (0, alpaca_client_1.createAlpacaClient)(config.runtime.alpaca);
         console.log('Alpaca client initialized');

@@ -1,0 +1,34 @@
+{
+  "runtime": {
+    "alpaca": {
+      "apiKey": "your-api-key-here",
+      "apiSecret": "your-api-secret-here",
+      "paperTrading": true
+    },
+    "rateLimits": {
+      "orders": 200,
+      "data": 200,
+      "burst": 10
+    },
+    "orderRules": {
+      "cooldownMs": 1000,
+      "duplicateWindowMs": 5000,
+      "maxPerSymbol": 5,
+      "maxTotal": 50
+    },
+    "marketHours": {
+      "enablePreMarket": true,
+      "enableAfterHours": true
+    },
+    "monitoring": {
+      "priceCheckIntervalMs": 100,
+      "websocketHeartbeatMs": 30000
+    }
+  },
+  "startup": {
+    "apiPort": 9000,
+    "monitorPort": 5900
+  },
+  "$schema": "./node_modules/alpaca-api-service-backend/schemas/config.schema.json",
+  "_comment": "Replace 'your-api-key-here' and 'your-api-secret-here' with your actual Alpaca API credentials.\nFor security, never commit this file with real credentials to version control."
+}

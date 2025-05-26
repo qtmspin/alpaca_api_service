@@ -11,8 +11,9 @@
  * - Manage error handling and rate limiting
  */
 
-// Import the SDK using require to avoid ESM import issues with the preview version
-const { createClient } = require('@alpacahq/typescript-sdk');
+// Import the SDK using dynamic import to handle ESM modules
+// We'll initialize this in the constructor
+let createClient: any;
 
 /**
  * Configuration interface for Alpaca client
@@ -153,15 +154,51 @@ export class AlpacaClient {
    * @param config - Alpaca API configuration
    */
   constructor(private config: AlpacaConfig) {
-    this.client = createClient({
-      key: config.apiKey,
-      secret: config.apiSecret,
-      paper: config.paperTrading !== false, // Default to paper trading
-      tokenBucket: {
-        capacity: 200, // Maximum number of tokens
-        fillRate: 60   // Tokens refilled per second
-      }
-    });
+    // Initialize the client asynchronously
+    this.initClient();
+  }
+
+  /**
+   * Initialize the Alpaca client asynchronously
+   * This handles the dynamic import of the ESM module
+   */
+  /**
+   * Ensure the client is initialized before making API calls
+   * @returns The initialized client
+   */
+  private async ensureClient(): Promise<any> {
+    if (!this.client) {
+      await this.initClient();
+    }
+    if (!this.client) {
+      throw new Error('Alpaca client failed to initialize');
+    }
+    return this.client;
+  }
+
+  /**
+   * Initialize the Alpaca client asynchronously
+   * This handles the dynamic import of the ESM module
+   */
+  private async initClient(): Promise<void> {
+    try {
+      // Dynamically import the SDK
+      const alpacaSdk = await import('@alpacahq/typescript-sdk');
+      createClient = alpacaSdk.createClient;
+      
+      this.client = createClient({
+        key: this.config.apiKey,
+        secret: this.config.apiSecret,
+        paper: this.config.paperTrading !== false, // Default to paper trading
+        tokenBucket: {
+          capacity: 200, // Maximum number of tokens
+          fillRate: 60   // Tokens refilled per second
+        }
+      });
+    } catch (error) {
+      console.error('Failed to initialize Alpaca client:', error);
+      throw new Error(`Failed to initialize Alpaca client: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   
   /**
@@ -170,7 +207,8 @@ export class AlpacaClient {
    */
   public async getAccount(): Promise<AccountResponse> {
     try {
-      const account = await this.client.getAccount();
+      const client = await this.ensureClient();
+      const account = await client.getAccount();
       
       return {
         accountNumber: account.account_number || '',
@@ -198,7 +236,8 @@ export class AlpacaClient {
    */
   public async getPositions(): Promise<PositionResponse[]> {
     try {
-      const positions = await this.client.getPositions();
+      const client = await this.ensureClient();
+      const positions = await client.getPositions();
       
       return positions.map((position: any) => ({
         symbol: position.symbol || '',
@@ -226,8 +265,9 @@ export class AlpacaClient {
    */
   public async getPosition(symbol: string): Promise<PositionResponse> {
     try {
+      const client = await this.ensureClient();
       // Use symbol_or_asset_id as the parameter name per SDK documentation
-      const position = await this.client.getPosition({ symbol_or_asset_id: symbol });
+      const position = await client.getPosition({ symbol_or_asset_id: symbol });
       
       return {
         symbol: position.symbol || symbol,
@@ -261,33 +301,21 @@ export class AlpacaClient {
    */
   public async createOrder(params: OrderParams): Promise<OrderResponse> {
     try {
-      // Convert parameters to the format expected by the TypeScript SDK
-      const orderRequest: any = {
+      const client = await this.ensureClient();
+      // Convert parameters to the format expected by the SDK
+      const orderParams = {
         symbol: params.symbol,
-        qty: String(params.qty),
+        qty: params.qty,
         side: params.side,
         type: params.orderType,
         time_in_force: params.timeInForce,
+        limit_price: params.limitPrice,
+        stop_price: params.stopPrice,
+        client_order_id: params.clientOrderId,
+        extended_hours: params.extendedHours
       };
       
-      // Add conditional fields
-      if (params.limitPrice !== undefined) {
-        orderRequest.limit_price = String(params.limitPrice);
-      }
-      
-      if (params.stopPrice !== undefined) {
-        orderRequest.stop_price = String(params.stopPrice);
-      }
-      
-      if (params.clientOrderId) {
-        orderRequest.client_order_id = params.clientOrderId;
-      }
-      
-      if (params.extendedHours !== undefined) {
-        orderRequest.extended_hours = params.extendedHours;
-      }
-      
-      const order = await this.client.createOrder(orderRequest);
+      const order = await client.createOrder(orderParams);
       
       return this.formatOrderResponse(order);
     } catch (error: unknown) {
@@ -303,7 +331,8 @@ export class AlpacaClient {
    */
   public async getOrder(orderId: string): Promise<OrderResponse> {
     try {
-      const order = await this.client.getOrder({ order_id: orderId });
+      const client = await this.ensureClient();
+      const order = await client.getOrder({ order_id: orderId });
       return this.formatOrderResponse(order);
     } catch (error: any) {
       if (error?.status === 404 || error?.response?.status === 404) {
@@ -324,13 +353,14 @@ export class AlpacaClient {
    */
   public async getOrders(status: string = 'open', limit: number = 50): Promise<OrderResponse[]> {
     try {
+      const client = await this.ensureClient();
       const request: any = {
         status: status,
         limit,
         direction: 'desc'
       };
       
-      const orders = await this.client.getOrders(request);
+      const orders = await client.getOrders(request);
       
       // Handle both single order and array responses
       const orderArray = Array.isArray(orders) ? orders : [orders];
@@ -348,7 +378,8 @@ export class AlpacaClient {
    */
   public async cancelOrder(orderId: string): Promise<{ orderId: string; status: string }> {
     try {
-      await this.client.cancelOrder({ order_id: orderId });
+      const client = await this.ensureClient();
+      await client.cancelOrder({ order_id: orderId });
       
       return {
         orderId,
@@ -372,8 +403,9 @@ export class AlpacaClient {
    */
   public async getQuote(symbol: string): Promise<QuoteResponse> {
     try {
+      const client = await this.ensureClient();
       // Use the stocks quotes latest method from the TypeScript SDK
-      const response = await this.client.getStocksQuotesLatest({ symbols: symbol });
+      const response = await client.getStocksQuotesLatest({ symbols: symbol });
       
       // Extract the quote data - handle various response structures
       let quote: any;
@@ -420,6 +452,7 @@ export class AlpacaClient {
     limit?: number
   ): Promise<BarResponse[]> {
     try {
+      const client = await this.ensureClient();
       const request: any = {
         symbols: symbol,
         timeframe,
@@ -430,7 +463,7 @@ export class AlpacaClient {
       if (end) request.end = end.toISOString();
       
       // Use the stocks bars method from the TypeScript SDK
-      const response = await this.client.getStocksBars(request);
+      const response = await client.getStocksBars(request);
       
       // Extract bars from the response structure
       let bars: any[] = [];
@@ -466,7 +499,8 @@ export class AlpacaClient {
    */
   public async getAssets(status: string = 'active'): Promise<any[]> {
     try {
-      const assets = await this.client.getAssets({ status });
+      const client = await this.ensureClient();
+      const assets = await client.getAssets({ status });
       
       return assets.map((asset: any) => ({
         id: asset.id,
@@ -492,8 +526,9 @@ export class AlpacaClient {
    */
   public async getAsset(symbol: string): Promise<any> {
     try {
+      const client = await this.ensureClient();
       // Use symbol_or_asset_id as the parameter name per SDK documentation
-      const asset = await this.client.getAsset({ symbol_or_asset_id: symbol });
+      const asset = await client.getAsset({ symbol_or_asset_id: symbol });
       
       return {
         id: asset.id,
@@ -519,8 +554,9 @@ export class AlpacaClient {
    */
   public async closePosition(symbol: string): Promise<{ symbol: string; side: string; qty: number; status: string }> {
     try {
+      const client = await this.ensureClient();
       // Use symbol_or_asset_id as the parameter name per SDK documentation
-      const result = await this.client.closePosition({ symbol_or_asset_id: symbol });
+      const result = await client.closePosition({ symbol_or_asset_id: symbol });
       
       return {
         symbol,

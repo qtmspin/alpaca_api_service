@@ -35,10 +35,38 @@ class ConfigManager {
         this.listeners = [];
         this.configPath = configPath;
         // Initialize with default values from schema
-        this.config = schemas_1.ServiceConfigSchema.parse({
-            runtime: {},
-            startup: {}
-        });
+        this.config = {
+            runtime: {
+                alpaca: {
+                    apiKey: '',
+                    apiSecret: '',
+                    paperTrading: true
+                },
+                rateLimits: {
+                    orders: 200,
+                    data: 200,
+                    burst: 10
+                },
+                orderRules: {
+                    cooldownMs: 1000,
+                    duplicateWindowMs: 5000,
+                    maxPerSymbol: 5,
+                    maxTotal: 50
+                },
+                marketHours: {
+                    enablePreMarket: true,
+                    enableAfterHours: true
+                },
+                monitoring: {
+                    priceCheckIntervalMs: 100,
+                    websocketHeartbeatMs: 30000
+                }
+            },
+            startup: {
+                apiPort: 9000,
+                monitorPort: 5900
+            }
+        };
     }
     /**
      * Load configuration from file
@@ -52,12 +80,27 @@ class ConfigManager {
                 .then(() => true)
                 .catch(() => false);
             if (fileExists) {
+                console.log(`Loading configuration from: ${this.configPath}`);
                 const configData = await promises_1.default.readFile(this.configPath, 'utf-8');
                 const parsedConfig = JSON.parse(configData);
                 // Validate and set defaults for any missing fields
-                this.config = schemas_1.ServiceConfigSchema.parse(parsedConfig);
+                this.config = {
+                    ...this.config, // Start with defaults
+                    ...parsedConfig, // Override with any values from the file
+                    runtime: {
+                        ...this.config.runtime,
+                        ...(parsedConfig.runtime || {})
+                    },
+                    startup: {
+                        ...this.config.startup,
+                        ...(parsedConfig.startup || {})
+                    }
+                };
+                // Validate the final config
+                this.config = schemas_1.ServiceConfigSchema.parse(this.config);
             }
             else {
+                console.log('No config file found, using defaults');
                 // Create a new config file with defaults if it doesn't exist
                 await this.saveConfig();
             }

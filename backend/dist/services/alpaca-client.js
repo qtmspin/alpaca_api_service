@@ -11,10 +11,45 @@
  * - Format data for the frontend
  * - Manage error handling and rate limiting
  */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AlpacaClient = void 0;
 exports.createAlpacaClient = createAlpacaClient;
-const typescript_sdk_1 = require("@alpacahq/typescript-sdk");
+// Import the SDK using dynamic import to handle ESM modules
+// We'll initialize this in the constructor
+let createClient;
 /**
  * Helper function to safely convert a value to a number
  */
@@ -44,15 +79,49 @@ class AlpacaClient {
      */
     constructor(config) {
         this.config = config;
-        this.client = (0, typescript_sdk_1.createClient)({
-            key: config.apiKey,
-            secret: config.apiSecret,
-            paper: config.paperTrading !== false, // Default to paper trading
-            tokenBucket: {
-                capacity: 200, // Maximum number of tokens
-                fillRate: 60 // Tokens refilled per second
-            }
-        });
+        // Initialize the client asynchronously
+        this.initClient();
+    }
+    /**
+     * Initialize the Alpaca client asynchronously
+     * This handles the dynamic import of the ESM module
+     */
+    /**
+     * Ensure the client is initialized before making API calls
+     * @returns The initialized client
+     */
+    async ensureClient() {
+        if (!this.client) {
+            await this.initClient();
+        }
+        if (!this.client) {
+            throw new Error('Alpaca client failed to initialize');
+        }
+        return this.client;
+    }
+    /**
+     * Initialize the Alpaca client asynchronously
+     * This handles the dynamic import of the ESM module
+     */
+    async initClient() {
+        try {
+            // Dynamically import the SDK
+            const alpacaSdk = await Promise.resolve().then(() => __importStar(require('@alpacahq/typescript-sdk')));
+            createClient = alpacaSdk.createClient;
+            this.client = createClient({
+                key: this.config.apiKey,
+                secret: this.config.apiSecret,
+                paper: this.config.paperTrading !== false, // Default to paper trading
+                tokenBucket: {
+                    capacity: 200, // Maximum number of tokens
+                    fillRate: 60 // Tokens refilled per second
+                }
+            });
+        }
+        catch (error) {
+            console.error('Failed to initialize Alpaca client:', error);
+            throw new Error(`Failed to initialize Alpaca client: ${error instanceof Error ? error.message : String(error)}`);
+        }
     }
     /**
      * Get account information
@@ -60,7 +129,8 @@ class AlpacaClient {
      */
     async getAccount() {
         try {
-            const account = await this.client.getAccount();
+            const client = await this.ensureClient();
+            const account = await client.getAccount();
             return {
                 accountNumber: account.account_number || '',
                 status: account.status || 'UNKNOWN',
@@ -87,7 +157,8 @@ class AlpacaClient {
      */
     async getPositions() {
         try {
-            const positions = await this.client.getPositions();
+            const client = await this.ensureClient();
+            const positions = await client.getPositions();
             return positions.map((position) => ({
                 symbol: position.symbol || '',
                 qty: safeToNumber(position.qty),
@@ -114,7 +185,9 @@ class AlpacaClient {
      */
     async getPosition(symbol) {
         try {
-            const position = await this.client.getPosition({ symbol });
+            const client = await this.ensureClient();
+            // Use symbol_or_asset_id as the parameter name per SDK documentation
+            const position = await client.getPosition({ symbol_or_asset_id: symbol });
             return {
                 symbol: position.symbol || symbol,
                 qty: safeToNumber(position.qty),
@@ -147,28 +220,20 @@ class AlpacaClient {
      */
     async createOrder(params) {
         try {
-            // Convert parameters to the format expected by the TypeScript SDK
-            const orderRequest = {
+            const client = await this.ensureClient();
+            // Convert parameters to the format expected by the SDK
+            const orderParams = {
                 symbol: params.symbol,
-                qty: String(params.qty),
+                qty: params.qty,
                 side: params.side,
                 type: params.orderType,
                 time_in_force: params.timeInForce,
+                limit_price: params.limitPrice,
+                stop_price: params.stopPrice,
+                client_order_id: params.clientOrderId,
+                extended_hours: params.extendedHours
             };
-            // Add conditional fields
-            if (params.limitPrice !== undefined) {
-                orderRequest.limit_price = String(params.limitPrice);
-            }
-            if (params.stopPrice !== undefined) {
-                orderRequest.stop_price = String(params.stopPrice);
-            }
-            if (params.clientOrderId) {
-                orderRequest.client_order_id = params.clientOrderId;
-            }
-            if (params.extendedHours !== undefined) {
-                orderRequest.extended_hours = params.extendedHours;
-            }
-            const order = await this.client.createOrder(orderRequest);
+            const order = await client.createOrder(orderParams);
             return this.formatOrderResponse(order);
         }
         catch (error) {
@@ -183,7 +248,8 @@ class AlpacaClient {
      */
     async getOrder(orderId) {
         try {
-            const order = await this.client.getOrder({ order_id: orderId });
+            const client = await this.ensureClient();
+            const order = await client.getOrder({ order_id: orderId });
             return this.formatOrderResponse(order);
         }
         catch (error) {
@@ -204,12 +270,13 @@ class AlpacaClient {
      */
     async getOrders(status = 'open', limit = 50) {
         try {
+            const client = await this.ensureClient();
             const request = {
                 status: status,
                 limit,
                 direction: 'desc'
             };
-            const orders = await this.client.getOrders(request);
+            const orders = await client.getOrders(request);
             // Handle both single order and array responses
             const orderArray = Array.isArray(orders) ? orders : [orders];
             return orderArray.map((order) => this.formatOrderResponse(order));
@@ -226,7 +293,8 @@ class AlpacaClient {
      */
     async cancelOrder(orderId) {
         try {
-            await this.client.cancelOrder({ order_id: orderId });
+            const client = await this.ensureClient();
+            await client.cancelOrder({ order_id: orderId });
             return {
                 orderId,
                 status: 'canceled'
@@ -249,16 +317,32 @@ class AlpacaClient {
      */
     async getQuote(symbol) {
         try {
-            // Use the market data methods from the TypeScript SDK
-            const quote = await this.client.getLatestQuote({ symbol });
+            const client = await this.ensureClient();
+            // Use the stocks quotes latest method from the TypeScript SDK
+            const response = await client.getStocksQuotesLatest({ symbols: symbol });
+            // Extract the quote data - handle various response structures
+            let quote;
+            if (response.quotes && response.quotes[symbol]) {
+                quote = response.quotes[symbol];
+            }
+            else if (response[symbol]) {
+                quote = response[symbol];
+            }
+            else if (Array.isArray(response) && response.length > 0) {
+                quote = response[0];
+            }
+            else {
+                quote = response;
+            }
             return {
                 symbol,
-                bidPrice: safeToNumber(quote.bid_price),
-                bidSize: safeToNumber(quote.bid_size),
-                askPrice: safeToNumber(quote.ask_price),
-                askSize: safeToNumber(quote.ask_size),
-                timestamp: quote.timestamp || new Date().toISOString(),
-                latestPrice: (safeToNumber(quote.bid_price) + safeToNumber(quote.ask_price)) / 2
+                bidPrice: safeToNumber(quote.bp || quote.bid_price || quote.bidPrice),
+                bidSize: safeToNumber(quote.bs || quote.bid_size || quote.bidSize),
+                askPrice: safeToNumber(quote.ap || quote.ask_price || quote.askPrice),
+                askSize: safeToNumber(quote.as || quote.ask_size || quote.askSize),
+                timestamp: quote.t || quote.timestamp || new Date().toISOString(),
+                latestPrice: (safeToNumber(quote.bp || quote.bid_price || quote.bidPrice) +
+                    safeToNumber(quote.ap || quote.ask_price || quote.askPrice)) / 2
             };
         }
         catch (error) {
@@ -277,8 +361,9 @@ class AlpacaClient {
      */
     async getBars(symbol, timeframe, start, end, limit) {
         try {
+            const client = await this.ensureClient();
             const request = {
-                symbol,
+                symbols: symbol,
                 timeframe,
                 limit: limit || 100
             };
@@ -286,17 +371,30 @@ class AlpacaClient {
                 request.start = start.toISOString();
             if (end)
                 request.end = end.toISOString();
-            const response = await this.client.getBars(request);
-            // Handle the response structure - the SDK typically returns an object with bars array
-            const bars = response.bars || response || [];
+            // Use the stocks bars method from the TypeScript SDK
+            const response = await client.getStocksBars(request);
+            // Extract bars from the response structure
+            let bars = [];
+            if (response.bars && response.bars[symbol]) {
+                bars = response.bars[symbol];
+            }
+            else if (response[symbol]) {
+                bars = response[symbol];
+            }
+            else if (response.bars && Array.isArray(response.bars)) {
+                bars = response.bars;
+            }
+            else if (Array.isArray(response)) {
+                bars = response;
+            }
             return bars.map((bar) => ({
                 symbol,
-                timestamp: bar.timestamp || bar.t || new Date().toISOString(),
-                open: safeToNumber(bar.open || bar.o),
-                high: safeToNumber(bar.high || bar.h),
-                low: safeToNumber(bar.low || bar.l),
-                close: safeToNumber(bar.close || bar.c),
-                volume: safeToNumber(bar.volume || bar.v)
+                timestamp: bar.t || bar.timestamp || new Date().toISOString(),
+                open: safeToNumber(bar.o || bar.open),
+                high: safeToNumber(bar.h || bar.high),
+                low: safeToNumber(bar.l || bar.low),
+                close: safeToNumber(bar.c || bar.close),
+                volume: safeToNumber(bar.v || bar.volume)
             }));
         }
         catch (error) {
@@ -311,7 +409,8 @@ class AlpacaClient {
      */
     async getAssets(status = 'active') {
         try {
-            const assets = await this.client.getAssets({ status });
+            const client = await this.ensureClient();
+            const assets = await client.getAssets({ status });
             return assets.map((asset) => ({
                 id: asset.id,
                 symbol: asset.symbol,
@@ -336,7 +435,9 @@ class AlpacaClient {
      */
     async getAsset(symbol) {
         try {
-            const asset = await this.client.getAsset({ symbol });
+            const client = await this.ensureClient();
+            // Use symbol_or_asset_id as the parameter name per SDK documentation
+            const asset = await client.getAsset({ symbol_or_asset_id: symbol });
             return {
                 id: asset.id,
                 symbol: asset.symbol,
@@ -361,7 +462,9 @@ class AlpacaClient {
      */
     async closePosition(symbol) {
         try {
-            const result = await this.client.closePosition({ symbol });
+            const client = await this.ensureClient();
+            // Use symbol_or_asset_id as the parameter name per SDK documentation
+            const result = await client.closePosition({ symbol_or_asset_id: symbol });
             return {
                 symbol,
                 side: result.side || 'unknown',

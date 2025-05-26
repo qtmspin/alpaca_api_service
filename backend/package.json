@@ -10,7 +10,8 @@
     "watch": "ts-node --watch src/index.ts",
     "test": "jest",
     "lint": "eslint src/**/*.ts",
-    "lint:fix": "eslint src/**/*.ts --fix"
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "setup": "node scripts/setup"
   },
   "dependencies": {
     "@alpacahq/typescript-sdk": "^0.0.31-preview",
