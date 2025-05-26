@@ -16,6 +16,23 @@ exports.AlpacaClient = void 0;
 exports.createAlpacaClient = createAlpacaClient;
 const typescript_sdk_1 = require("@alpacahq/typescript-sdk");
 /**
+ * Helper function to safely convert a value to a number
+ */
+function safeToNumber(value, defaultValue = 0) {
+    if (value === null || value === undefined)
+        return defaultValue;
+    const num = typeof value === 'string' ? parseFloat(value) : Number(value);
+    return isNaN(num) ? defaultValue : num;
+}
+/**
+ * Helper function to safely convert a value to a string
+ */
+function safeToString(value) {
+    if (value === null || value === undefined)
+        return undefined;
+    return String(value);
+}
+/**
  * AlpacaClient class
  *
  * Provides methods for interacting with the Alpaca API using the official TypeScript SDK.
@@ -30,7 +47,7 @@ class AlpacaClient {
         this.client = (0, typescript_sdk_1.createClient)({
             key: config.apiKey,
             secret: config.apiSecret,
-            paper: config.paperTrading !== false, // Default to paper trading if not specified
+            paper: config.paperTrading !== false, // Default to paper trading
             tokenBucket: {
                 capacity: 200, // Maximum number of tokens
                 fillRate: 60 // Tokens refilled per second
@@ -45,23 +62,23 @@ class AlpacaClient {
         try {
             const account = await this.client.getAccount();
             return {
-                accountNumber: account.account_number,
-                status: account.status,
-                currency: account.currency,
-                buyingPower: parseFloat(account.buying_power),
-                cash: parseFloat(account.cash),
-                portfolioValue: parseFloat(account.portfolio_value),
-                patternDayTrader: account.pattern_day_trader,
-                tradingBlocked: account.trading_blocked,
-                transfersBlocked: account.transfers_blocked,
-                accountBlocked: account.account_blocked,
-                createdAt: account.created_at,
+                accountNumber: account.account_number || '',
+                status: account.status || 'UNKNOWN',
+                currency: account.currency || 'USD',
+                buyingPower: safeToNumber(account.buying_power),
+                cash: safeToNumber(account.cash),
+                portfolioValue: safeToNumber(account.portfolio_value),
+                patternDayTrader: Boolean(account.pattern_day_trader),
+                tradingBlocked: Boolean(account.trading_blocked),
+                transfersBlocked: Boolean(account.transfers_blocked),
+                accountBlocked: Boolean(account.account_blocked),
+                createdAt: account.created_at || new Date().toISOString(),
                 updatedAt: new Date().toISOString()
             };
         }
         catch (error) {
             console.error('Error getting account information:', error);
-            throw error;
+            throw this.handleApiError(error, 'Failed to get account information');
         }
     }
     /**
@@ -72,22 +89,22 @@ class AlpacaClient {
         try {
             const positions = await this.client.getPositions();
             return positions.map((position) => ({
-                symbol: position.symbol,
-                qty: parseFloat(position.qty),
-                avgEntryPrice: parseFloat(position.avg_entry_price),
-                side: parseFloat(position.qty) > 0 ? 'long' : 'short',
-                marketValue: parseFloat(position.market_value),
-                costBasis: parseFloat(position.cost_basis),
-                unrealizedPl: parseFloat(position.unrealized_pl),
-                unrealizedPlpc: parseFloat(position.unrealized_plpc),
-                currentPrice: parseFloat(position.current_price),
-                lastdayPrice: parseFloat(position.lastday_price),
-                changeToday: parseFloat(position.change_today)
+                symbol: position.symbol || '',
+                qty: safeToNumber(position.qty),
+                avgEntryPrice: safeToNumber(position.avg_entry_price),
+                side: safeToNumber(position.qty) >= 0 ? 'long' : 'short',
+                marketValue: safeToNumber(position.market_value),
+                costBasis: safeToNumber(position.cost_basis),
+                unrealizedPl: safeToNumber(position.unrealized_pl),
+                unrealizedPlpc: safeToNumber(position.unrealized_plpc),
+                currentPrice: safeToNumber(position.current_price),
+                lastdayPrice: safeToNumber(position.lastday_price),
+                changeToday: safeToNumber(position.change_today)
             }));
         }
         catch (error) {
             console.error('Error getting positions:', error);
-            throw error;
+            throw this.handleApiError(error, 'Failed to get positions');
         }
     }
     /**
@@ -97,29 +114,30 @@ class AlpacaClient {
      */
     async getPosition(symbol) {
         try {
-            // Use a string parameter as the SDK expects for the position endpoint
-            const position = await this.client.getPosition(symbol);
+            const position = await this.client.getPosition({ symbol });
             return {
-                symbol: position.symbol,
-                qty: parseFloat(position.qty),
-                avgEntryPrice: parseFloat(position.avg_entry_price),
-                side: parseFloat(position.qty) > 0 ? 'long' : 'short',
-                marketValue: parseFloat(position.market_value),
-                costBasis: parseFloat(position.cost_basis),
-                unrealizedPl: parseFloat(position.unrealized_pl),
-                unrealizedPlpc: parseFloat(position.unrealized_plpc),
-                currentPrice: parseFloat(position.current_price),
-                lastdayPrice: parseFloat(position.lastday_price),
-                changeToday: parseFloat(position.change_today)
+                symbol: position.symbol || symbol,
+                qty: safeToNumber(position.qty),
+                avgEntryPrice: safeToNumber(position.avg_entry_price),
+                side: safeToNumber(position.qty) >= 0 ? 'long' : 'short',
+                marketValue: safeToNumber(position.market_value),
+                costBasis: safeToNumber(position.cost_basis),
+                unrealizedPl: safeToNumber(position.unrealized_pl),
+                unrealizedPlpc: safeToNumber(position.unrealized_plpc),
+                currentPrice: safeToNumber(position.current_price),
+                lastdayPrice: safeToNumber(position.lastday_price),
+                changeToday: safeToNumber(position.change_today)
             };
         }
         catch (error) {
-            // Check for 404 error (position not found)
-            if (error?.status === 404) {
-                throw new Error(`No position found for symbol ${symbol}`);
+            // Handle 404 error specifically
+            if (error?.status === 404 || error?.response?.status === 404) {
+                const notFoundError = new Error(`No position found for symbol ${symbol}`);
+                notFoundError.statusCode = 404;
+                throw notFoundError;
             }
             console.error(`Error getting position for ${symbol}:`, error);
-            throw error;
+            throw this.handleApiError(error, `Failed to get position for ${symbol}`);
         }
     }
     /**
@@ -129,47 +147,33 @@ class AlpacaClient {
      */
     async createOrder(params) {
         try {
-            // Convert order parameters to the format expected by the SDK
-            const orderParams = {
+            // Convert parameters to the format expected by the TypeScript SDK
+            const orderRequest = {
                 symbol: params.symbol,
-                qty: params.qty.toString(),
+                qty: String(params.qty),
                 side: params.side,
                 type: params.orderType,
                 time_in_force: params.timeInForce,
-                limit_price: params.limitPrice ? String(params.limitPrice) : undefined,
-                stop_price: params.stopPrice ? String(params.stopPrice) : undefined,
-                client_order_id: params.clientOrderId,
-                extended_hours: params.extendedHours
             };
-            // Use type assertion for the client.createOrder method
-            const order = await this.client.createOrder(orderParams);
-            return {
-                orderId: order.id,
-                clientOrderId: order.client_order_id,
-                symbol: order.symbol,
-                side: order.side,
-                orderType: order.type,
-                timeInForce: order.time_in_force,
-                qty: parseFloat(order.qty),
-                filledQty: parseFloat(order.filled_qty),
-                limitPrice: order.limit_price ? parseFloat(order.limit_price) : undefined,
-                stopPrice: order.stop_price ? parseFloat(order.stop_price) : undefined,
-                status: order.status,
-                createdAt: order.created_at,
-                updatedAt: order.updated_at,
-                submittedAt: order.submitted_at,
-                filledAt: order.filled_at,
-                expiredAt: order.expired_at,
-                canceledAt: order.canceled_at
-            };
+            // Add conditional fields
+            if (params.limitPrice !== undefined) {
+                orderRequest.limit_price = String(params.limitPrice);
+            }
+            if (params.stopPrice !== undefined) {
+                orderRequest.stop_price = String(params.stopPrice);
+            }
+            if (params.clientOrderId) {
+                orderRequest.client_order_id = params.clientOrderId;
+            }
+            if (params.extendedHours !== undefined) {
+                orderRequest.extended_hours = params.extendedHours;
+            }
+            const order = await this.client.createOrder(orderRequest);
+            return this.formatOrderResponse(order);
         }
         catch (error) {
             console.error('Error creating order:', error);
-            // Add more detailed error information
-            if (error instanceof Error) {
-                throw new Error(`Failed to create order: ${error.message}`);
-            }
-            throw error;
+            throw this.handleApiError(error, 'Failed to create order');
         }
     }
     /**
@@ -180,29 +184,16 @@ class AlpacaClient {
     async getOrder(orderId) {
         try {
             const order = await this.client.getOrder({ order_id: orderId });
-            return {
-                orderId: order.id,
-                clientOrderId: order.client_order_id,
-                symbol: order.symbol,
-                side: order.side,
-                orderType: order.type,
-                timeInForce: order.time_in_force,
-                qty: parseFloat(order.qty),
-                filledQty: parseFloat(order.filled_qty),
-                limitPrice: order.limit_price ? parseFloat(order.limit_price) : undefined,
-                stopPrice: order.stop_price ? parseFloat(order.stop_price) : undefined,
-                status: order.status,
-                createdAt: order.created_at,
-                updatedAt: order.updated_at,
-                submittedAt: order.submitted_at,
-                filledAt: order.filled_at,
-                expiredAt: order.expired_at,
-                canceledAt: order.canceled_at
-            };
+            return this.formatOrderResponse(order);
         }
         catch (error) {
+            if (error?.status === 404 || error?.response?.status === 404) {
+                const notFoundError = new Error(`Order ${orderId} not found`);
+                notFoundError.statusCode = 404;
+                throw notFoundError;
+            }
             console.error(`Error getting order ${orderId}:`, error);
-            throw error;
+            throw this.handleApiError(error, `Failed to get order ${orderId}`);
         }
     }
     /**
@@ -213,37 +204,19 @@ class AlpacaClient {
      */
     async getOrders(status = 'open', limit = 50) {
         try {
-            // Use parameters as the SDK expects for the getOrders endpoint
-            const params = {
-                status,
+            const request = {
+                status: status,
                 limit,
                 direction: 'desc'
             };
-            const orders = await this.client.getOrders(params);
-            // The SDK returns an array of orders
-            return (Array.isArray(orders) ? orders : [orders]).map((order) => ({
-                orderId: order.id,
-                clientOrderId: order.client_order_id,
-                symbol: order.symbol,
-                side: order.side,
-                orderType: order.type,
-                timeInForce: order.time_in_force,
-                qty: parseFloat(order.qty),
-                filledQty: parseFloat(order.filled_qty),
-                limitPrice: order.limit_price ? parseFloat(order.limit_price) : undefined,
-                stopPrice: order.stop_price ? parseFloat(order.stop_price) : undefined,
-                status: order.status,
-                createdAt: order.created_at,
-                updatedAt: order.updated_at,
-                submittedAt: order.submitted_at,
-                filledAt: order.filled_at,
-                expiredAt: order.expired_at,
-                canceledAt: order.canceled_at
-            }));
+            const orders = await this.client.getOrders(request);
+            // Handle both single order and array responses
+            const orderArray = Array.isArray(orders) ? orders : [orders];
+            return orderArray.map((order) => this.formatOrderResponse(order));
         }
         catch (error) {
             console.error('Error getting orders:', error);
-            throw error;
+            throw this.handleApiError(error, 'Failed to get orders');
         }
     }
     /**
@@ -260,8 +233,13 @@ class AlpacaClient {
             };
         }
         catch (error) {
+            if (error?.status === 404 || error?.response?.status === 404) {
+                const notFoundError = new Error(`Order ${orderId} not found`);
+                notFoundError.statusCode = 404;
+                throw notFoundError;
+            }
             console.error(`Error canceling order ${orderId}:`, error);
-            throw error;
+            throw this.handleApiError(error, `Failed to cancel order ${orderId}`);
         }
     }
     /**
@@ -271,28 +249,27 @@ class AlpacaClient {
      */
     async getQuote(symbol) {
         try {
-            // In the TypeScript SDK, we need to use the market_data client for quotes
-            // Use type assertion since the structure might vary between SDK versions
-            const quote = await this.client.getMarketData().getLatestQuote(symbol);
+            // Use the market data methods from the TypeScript SDK
+            const quote = await this.client.getLatestQuote({ symbol });
             return {
                 symbol,
-                bidPrice: parseFloat(quote.bidPrice),
-                bidSize: parseInt(quote.bidSize),
-                askPrice: parseFloat(quote.askPrice),
-                askSize: parseInt(quote.askSize),
-                timestamp: quote.timestamp,
-                latestPrice: (parseFloat(quote.bidPrice) + parseFloat(quote.askPrice)) / 2
+                bidPrice: safeToNumber(quote.bid_price),
+                bidSize: safeToNumber(quote.bid_size),
+                askPrice: safeToNumber(quote.ask_price),
+                askSize: safeToNumber(quote.ask_size),
+                timestamp: quote.timestamp || new Date().toISOString(),
+                latestPrice: (safeToNumber(quote.bid_price) + safeToNumber(quote.ask_price)) / 2
             };
         }
         catch (error) {
             console.error(`Error getting quote for ${symbol}:`, error);
-            throw error;
+            throw this.handleApiError(error, `Failed to get quote for ${symbol}`);
         }
     }
     /**
      * Get historical bars for a symbol
      * @param symbol - Stock symbol
-     * @param timeframe - Timeframe for bars (e.g., '1Min', '1D')
+     * @param timeframe - Timeframe for bars
      * @param start - Start date
      * @param end - End date
      * @param limit - Maximum number of bars to return
@@ -300,29 +277,31 @@ class AlpacaClient {
      */
     async getBars(symbol, timeframe, start, end, limit) {
         try {
-            // Create params object for the getBars endpoint
-            const params = {
-                timeframe,
-                start: start?.toISOString(),
-                end: end?.toISOString(),
-                limit
-            };
-            // In the TypeScript SDK, we need to use the market_data client for bars
-            // Use type assertion since the structure might vary between SDK versions
-            const barsResponse = await this.client.getMarketData().getBars(symbol, params);
-            return barsResponse.bars.map((bar) => ({
+            const request = {
                 symbol,
-                timestamp: bar.timestamp,
-                open: parseFloat(bar.open),
-                high: parseFloat(bar.high),
-                low: parseFloat(bar.low),
-                close: parseFloat(bar.close),
-                volume: parseInt(bar.volume.toString())
+                timeframe,
+                limit: limit || 100
+            };
+            if (start)
+                request.start = start.toISOString();
+            if (end)
+                request.end = end.toISOString();
+            const response = await this.client.getBars(request);
+            // Handle the response structure - the SDK typically returns an object with bars array
+            const bars = response.bars || response || [];
+            return bars.map((bar) => ({
+                symbol,
+                timestamp: bar.timestamp || bar.t || new Date().toISOString(),
+                open: safeToNumber(bar.open || bar.o),
+                high: safeToNumber(bar.high || bar.h),
+                low: safeToNumber(bar.low || bar.l),
+                close: safeToNumber(bar.close || bar.c),
+                volume: safeToNumber(bar.volume || bar.v)
             }));
         }
         catch (error) {
             console.error(`Error getting bars for ${symbol}:`, error);
-            throw error;
+            throw this.handleApiError(error, `Failed to get bars for ${symbol}`);
         }
     }
     /**
@@ -347,7 +326,7 @@ class AlpacaClient {
         }
         catch (error) {
             console.error('Error getting assets:', error);
-            throw error;
+            throw this.handleApiError(error, 'Failed to get assets');
         }
     }
     /**
@@ -357,8 +336,7 @@ class AlpacaClient {
      */
     async getAsset(symbol) {
         try {
-            // Use a string parameter as the SDK expects for the asset endpoint
-            const asset = await this.client.getAsset(symbol);
+            const asset = await this.client.getAsset({ symbol });
             return {
                 id: asset.id,
                 symbol: asset.symbol,
@@ -373,29 +351,88 @@ class AlpacaClient {
         }
         catch (error) {
             console.error(`Error getting asset ${symbol}:`, error);
-            throw error;
+            throw this.handleApiError(error, `Failed to get asset ${symbol}`);
         }
     }
     /**
      * Close a position
      * @param symbol - Stock symbol
-     * @returns Promise resolving to closed position
+     * @returns Promise resolving to closed position result
      */
     async closePosition(symbol) {
         try {
-            // Use a string parameter as the SDK expects for the closePosition endpoint
-            const response = await this.client.closePosition(symbol);
+            const result = await this.client.closePosition({ symbol });
             return {
                 symbol,
-                side: response.side,
-                qty: parseFloat(response.qty),
+                side: result.side || 'unknown',
+                qty: safeToNumber(result.qty),
                 status: 'closed'
             };
         }
         catch (error) {
+            if (error?.status === 404 || error?.response?.status === 404) {
+                const notFoundError = new Error(`Position not found for symbol ${symbol}`);
+                notFoundError.statusCode = 404;
+                throw notFoundError;
+            }
             console.error(`Error closing position for ${symbol}:`, error);
-            throw error;
+            throw this.handleApiError(error, `Failed to close position for ${symbol}`);
         }
+    }
+    /**
+     * Format order response to standardized format
+     * @param order - Raw order object from Alpaca API
+     * @returns Formatted order response
+     */
+    formatOrderResponse(order) {
+        return {
+            orderId: order.id || '',
+            clientOrderId: order.client_order_id,
+            symbol: order.symbol || '',
+            side: order.side || '',
+            orderType: order.type || order.order_type || '',
+            timeInForce: order.time_in_force || '',
+            qty: safeToNumber(order.qty),
+            filledQty: safeToNumber(order.filled_qty),
+            limitPrice: order.limit_price ? safeToNumber(order.limit_price) : undefined,
+            stopPrice: order.stop_price ? safeToNumber(order.stop_price) : undefined,
+            status: order.status || '',
+            createdAt: order.created_at || new Date().toISOString(),
+            updatedAt: order.updated_at || new Date().toISOString(),
+            submittedAt: order.submitted_at,
+            filledAt: order.filled_at,
+            expiredAt: order.expired_at,
+            canceledAt: order.canceled_at,
+            filledAvgPrice: order.filled_avg_price ? safeToNumber(order.filled_avg_price) : undefined
+        };
+    }
+    /**
+     * Handle API errors consistently
+     * @param error - The error object
+     * @param message - Default error message
+     * @returns Formatted error
+     */
+    handleApiError(error, message) {
+        // If it's already a handled error, just return it
+        if (error.statusCode) {
+            return error;
+        }
+        // Create a new error with the original message if available
+        const errorMessage = error instanceof Error ? error.message : message;
+        const apiError = new Error(errorMessage);
+        // Add status code if available
+        if (error?.status) {
+            apiError.statusCode = error.status;
+        }
+        else if (error?.response?.status) {
+            apiError.statusCode = error.response.status;
+        }
+        else {
+            apiError.statusCode = 500;
+        }
+        // Add error code if available
+        apiError.code = error?.code || 'ALPACA_API_ERROR';
+        return apiError;
     }
 }
 exports.AlpacaClient = AlpacaClient;

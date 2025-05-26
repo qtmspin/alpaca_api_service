@@ -1,40 +1,47 @@
 {
-  "name": "alpaca-api-service",
+  "name": "alpaca-api-service-backend",
   "version": "1.0.0",
-  "description": "A service for interacting with the Alpaca API with enhanced features",
+  "description": "Backend service for Alpaca API integration with artificial order management",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node-dev --respawn src/index.ts",
+    "dev": "ts-node src/index.ts",
+    "watch": "ts-node --watch src/index.ts",
     "test": "jest",
-    "lint": "eslint . --ext .ts"
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix"
   },
   "dependencies": {
     "@alpacahq/typescript-sdk": "^0.0.31-preview",
-    "cors": "^2.8.5",
     "express": "^4.18.2",
-    "helmet": "^7.0.0",
-    "sqlite3": "^5.1.6",
-    "uuid": "^9.0.0",
-    "zod": "^3.21.4",
-    "ws": "^8.13.0"
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "ws": "^8.14.2",
+    "zod": "^3.22.4",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
-    "@types/cors": "^2.8.13",
-    "@types/express": "^4.17.17",
-    "@types/helmet": "^4.0.0",
-    "@types/jest": "^29.5.3",
-    "@types/node": "^20.4.2",
-    "@types/sqlite3": "^3.1.8",
-    "@types/uuid": "^9.0.2",
-    "@types/ws": "^8.5.5",
-    "@typescript-eslint/eslint-plugin": "^6.0.0",
-    "@typescript-eslint/parser": "^6.0.0",
-    "eslint": "^8.44.0",
-    "jest": "^29.6.1",
-    "ts-jest": "^29.1.1",
-    "ts-node-dev": "^2.0.0",
-    "typescript": "^5.1.6"
-  }
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "@types/ws": "^8.5.10",
+    "@types/uuid": "^9.0.7",
+    "@types/node": "^20.10.5",
+    "typescript": "^5.3.3",
+    "ts-node": "^10.9.2",
+    "jest": "^29.7.0",
+    "@types/jest": "^29.5.8",
+    "eslint": "^8.56.0",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0"
+  },
+  "keywords": [
+    "alpaca",
+    "trading",
+    "api",
+    "typescript",
+    "express"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
 }
