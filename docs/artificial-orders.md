@@ -4,6 +4,8 @@
 
 Artificial orders are a mechanism for handling stop and stop-limit orders during pre-market (4:30 AM - 9:30 AM Eastern) and post-market (4:00 PM - 8:00 PM Eastern) hours when these order types aren't supported by the exchange. The Alpaca API Service implements an artificial order system that uses WebSocket connections for real-time price monitoring with sub-100ms latency, executing market or limit orders immediately when trigger conditions are met.
 
+The system is fully integrated with the real-time orders and positions WebSocket streaming, providing instant updates when artificial orders are triggered and executed.
+
 ## Market Hours
 
 The service defines market hours as follows:
@@ -184,14 +186,43 @@ The artificial order system:
 4. Executes market or limit orders instantly when trigger conditions are met
 5. Updates order status throughout the lifecycle
 6. Automatically expires day orders at market close
+7. Broadcasts real-time order updates via WebSocket when status changes
+8. Integrates with the positions WebSocket stream for immediate position updates after execution
 
 ### Architecture
 
 The system follows SOLID principles with a clean separation of concerns:
 
 - **MarketDataSubscriptionManager**: Handles WebSocket connections and market data subscriptions
+- **OrdersPositionsSubscriptionManager**: Manages WebSocket connections for orders and positions updates
 - **ArtificialOrderManager**: Manages order lifecycle and trigger conditions
 - **ArtificialOrdersController**: Provides the REST API endpoints
+
+### Real-Time Updates
+
+When an artificial order is triggered and executed, clients subscribed to the orders WebSocket channel will receive immediate updates with the new order status. This enables building reactive trading strategies that can respond instantly to order executions.
+
+Example WebSocket message when an artificial order is filled:
+
+```json
+{
+  "type": "order_update",
+  "payload": {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "symbol": "AAPL",
+    "qty": "10",
+    "side": "buy",
+    "type": "market",
+    "time_in_force": "day",
+    "status": "filled",
+    "filled_qty": "10",
+    "filled_avg_price": "151.25",
+    "created_at": "2025-01-15T04:45:00Z",
+    "updated_at": "2025-01-15T04:45:02Z",
+    "is_artificial": true
+  }
+}
+```
 
 ## Limitations
 

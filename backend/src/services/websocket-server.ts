@@ -14,6 +14,7 @@
 import { Server as HttpServer } from 'http';
 import WebSocket, { WebSocketServer as WSServer } from 'ws';
 import { ArtificialOrderManager } from '../core/index.js';
+import { AlpacaWebSocketController } from '../api/alpaca-websocket-controller.js';
 
 /**
  * WebSocketServer class
@@ -24,6 +25,7 @@ export class WebSocketServer {
   private wss: WSServer;
   private subscriptions: Map<WebSocket, Set<string>> = new Map();
   private liveStreamIntervals: Map<string, NodeJS.Timeout> = new Map();
+  private alpacaWebSocketController: AlpacaWebSocketController;
   
   /**
    * Constructor for WebSocketServer
@@ -38,6 +40,9 @@ export class WebSocketServer {
   ) {
     // Create WebSocket server
     this.wss = new WSServer({ server });
+    
+    // Initialize the Alpaca WebSocket controller
+    this.alpacaWebSocketController = new AlpacaWebSocketController(alpacaClient);
     
     // Set up event handlers
     this.setupEventHandlers();
@@ -280,37 +285,45 @@ export class WebSocketServer {
   
   /**
    * Start live streaming for a symbol
+   * @param symbol - Symbol to stream
    */
   private async startLiveStreamForSymbol(symbol: string): Promise<void> {
-    // Don't start if already streaming
-    if (this.liveStreamIntervals.has(symbol)) {
-      return;
-    }
-    
-    console.log(`Starting live stream for ${symbol}`);
-    
-    // Set up periodic updates every 5 seconds
-    const intervalId = setInterval(async () => {
-      try {
-        await this.fetchAndBroadcastMarketData(symbol);
-      } catch (error) {
-        console.error(`Error in live stream for ${symbol}:`, error);
+    try {
+      if (this.liveStreamIntervals.has(symbol)) {
+        console.log(`Live stream for ${symbol} already running`);
+        return;
       }
-    }, 5000);
-    
-    this.liveStreamIntervals.set(symbol, intervalId);
+      
+      // Use the AlpacaWebSocketController to subscribe to market data
+      await this.alpacaWebSocketController.subscribeToMarketData(symbol, (marketData) => {
+        // When market data is received, broadcast it to all subscribed clients
+        this.broadcastMarketData(symbol, marketData);
+      });
+      
+      // Set up interval to fetch and broadcast market data
+      const intervalId = setInterval(() => {
+        this.fetchAndBroadcastMarketData(symbol).catch(error => {
+          console.error(`Error fetching market data for ${symbol}:`, error);
+        });
+      }, 5000); // Update every 5 seconds
+      
+      this.liveStreamIntervals.set(symbol, intervalId);
+      console.log(`Live stream started for ${symbol}`);
+    } catch (error) {
+      console.error(`Failed to start live stream for ${symbol}:`, error);
+    }
   }
   
   /**
    * Fetch and broadcast market data for a symbol
+   * @param symbol - Symbol to fetch data for
    */
   private async fetchAndBroadcastMarketData(symbol: string): Promise<void> {
     try {
       const isCrypto = symbol.includes('/');
-      let marketData;
+      let marketData: any;
       
       if (isCrypto) {
-        // Handle crypto symbols
         const snapshots = await this.alpacaClient.getCryptoSnapshots([symbol]);
         marketData = {
           symbol,
@@ -321,37 +334,39 @@ export class WebSocketServer {
           timestamp: new Date().toISOString()
         };
       } else {
-        // Handle stock symbols
-        const [barData, quoteData] = await Promise.all([
+        const [barData, quoteData, assetData] = await Promise.all([
           this.alpacaClient.getStocksBarsLatest([symbol]).catch(() => ({ bars: {} })),
-          this.alpacaClient.getStocksQuotesLatest([symbol]).catch(() => ({ quotes: {} }))
+          this.alpacaClient.getStocksQuotesLatest([symbol]).catch(() => ({ quotes: {} })),
+          this.alpacaClient.getAsset(symbol).catch(() => null)
         ]);
         
         marketData = {
           symbol,
           bar: barData.bars?.[symbol] || null,
           quote: quoteData.quotes?.[symbol] || null,
-          asset: null,
+          asset: assetData || null,
           isCrypto: false,
           timestamp: new Date().toISOString()
         };
       }
       
-      // Broadcast to all subscribed clients
+      // Broadcast the market data to all subscribed clients
       this.broadcastMarketData(symbol, marketData);
       
     } catch (error) {
-      console.error(`Error fetching market data for ${symbol}:`, error);
+      console.error(`Error fetching and broadcasting market data for ${symbol}:`, error);
     }
   }
   
   /**
-   * Send initial market data to a client
+   * Send initial market data to a specific client
+   * @param ws - WebSocket connection
+   * @param symbol - Symbol to send data for
    */
   private async sendInitialMarketData(ws: WebSocket, symbol: string): Promise<void> {
     try {
       const isCrypto = symbol.includes('/');
-      let marketData;
+      let marketData: any;
       
       if (isCrypto) {
         const snapshots = await this.alpacaClient.getCryptoSnapshots([symbol]);

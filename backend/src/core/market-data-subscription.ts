@@ -53,6 +53,14 @@ export class MarketDataSubscriptionManager extends EventEmitter {
   // Connection status
   private connected: boolean = false;
   
+  // Alpaca API credentials
+  private apiKey: string = '';
+  private secretKey: string = '';
+  
+  // WebSocket URLs
+  private readonly stocksDataUrl: string = 'wss://stream.data.alpaca.markets/v2/sip';
+  private readonly cryptoDataUrl: string = 'wss://stream.data.alpaca.markets/v1beta2/crypto';
+  
   /**
    * Constructor
    */
@@ -61,20 +69,27 @@ export class MarketDataSubscriptionManager extends EventEmitter {
   }
   
   /**
-   * Initialize the subscription manager with a WebSocket client
-   * @param wsClient - WebSocket client
+   * Initialize the subscription manager with API credentials
+   * @param apiKey - Alpaca API key
+   * @param secretKey - Alpaca API secret key
+   * @param isCrypto - Whether to use crypto data stream (true) or stocks data stream (false)
    */
-  initialize(wsClient: any): void {
+  initialize(apiKey: string, secretKey: string, isCrypto: boolean = false): void {
     if (this.wsClient) {
       this.disconnect();
     }
     
-    this.wsClient = wsClient;
+    this.apiKey = apiKey;
+    this.secretKey = secretKey;
+    
+    // Create a new WebSocket connection
+    const url = isCrypto ? this.cryptoDataUrl : this.stocksDataUrl;
+    this.wsClient = new WebSocket(url);
+    
     this.setupEventHandlers();
     this.startHeartbeat();
-    this.connected = true;
     
-    this.emit('initialized');
+    this.emit('initializing');
   }
   
   /**
@@ -83,19 +98,39 @@ export class MarketDataSubscriptionManager extends EventEmitter {
   private setupEventHandlers(): void {
     if (!this.wsClient) return;
     
+    this.wsClient.on('open', () => {
+      console.log('Market data WebSocket connection opened');
+      this.authenticate();
+    });
+    
     this.wsClient.on('message', (data: any) => {
       try {
         // Parse the incoming message
         const message = JSON.parse(data.toString());
         
+        // Handle authentication response
+        if (message.T === 'success' && message.msg === 'authenticated') {
+          console.log('Successfully authenticated with Alpaca market data API');
+          this.connected = true;
+          this.emit('connected');
+          
+          // Resubscribe to active symbols if any
+          this.resubscribeToActiveSymbols();
+          return;
+        }
+        
         // Handle different message types
-        if (message.type === 'trade') {
+        if (message.T === 't') {
+          // Trade message
           this.handleTradeMessage(message);
-        } else if (message.type === 'quote') {
+        } else if (message.T === 'q') {
+          // Quote message
           this.handleQuoteMessage(message);
-        } else if (message.type === 'subscription') {
+        } else if (message.T === 'subscription') {
+          // Subscription message
           this.handleSubscriptionMessage(message);
-        } else if (message.type === 'error') {
+        } else if (message.T === 'error') {
+          // Error message
           this.handleErrorMessage(message);
         }
       } catch (error) {
@@ -104,17 +139,60 @@ export class MarketDataSubscriptionManager extends EventEmitter {
     });
     
     this.wsClient.on('error', (error: any) => {
-      console.error('WebSocket error:', error);
+      console.error('Market data WebSocket error:', error);
       this.emit('error', error);
       this.scheduleReconnect();
     });
     
     this.wsClient.on('close', () => {
-      console.log('WebSocket connection closed');
+      console.log('Market data WebSocket connection closed');
       this.connected = false;
       this.emit('disconnected');
       this.scheduleReconnect();
     });
+  }
+  
+  /**
+   * Authenticate with the Alpaca WebSocket API
+   */
+  private authenticate(): void {
+    if (!this.wsClient) return;
+    
+    try {
+      const authMsg = {
+        action: 'auth',
+        key: this.apiKey,
+        secret: this.secretKey
+      };
+      
+      this.wsClient.send(JSON.stringify(authMsg));
+      console.log('Sent authentication request to Alpaca market data API');
+    } catch (error) {
+      console.error('Error authenticating with Alpaca market data API:', error);
+      this.emit('error', error);
+    }
+  }
+  
+  /**
+   * Resubscribe to all active symbols after reconnection
+   */
+  private resubscribeToActiveSymbols(): void {
+    const symbols = Array.from(this.activeSubscriptions);
+    if (symbols.length === 0) return;
+    
+    try {
+      const subscribeMsg = {
+        action: 'subscribe',
+        trades: symbols,
+        quotes: symbols
+      };
+      
+      this.wsClient?.send(JSON.stringify(subscribeMsg));
+      console.log(`Resubscribed to ${symbols.length} symbols`);
+    } catch (error) {
+      console.error('Error resubscribing to symbols:', error);
+      this.emit('error', error);
+    }
   }
   
   /**
@@ -150,20 +228,20 @@ export class MarketDataSubscriptionManager extends EventEmitter {
    * Handle trade message
    */
   private handleTradeMessage(message: any): void {
-    const symbol = message.symbol;
+    const symbol = message.S; // Symbol
     
     // Update market data cache
     const marketData: MarketData = {
       symbol,
-      price: message.price,
-      volume: message.size,
-      timestamp: new Date().toISOString(),
+      price: parseFloat(message.p), // Price
+      volume: parseInt(message.s, 10), // Size
+      timestamp: new Date(message.t * 1000000).toISOString(), // Timestamp (convert from nanoseconds)
       source: 'trade'
     };
     
     this.marketDataBySymbol.set(symbol, marketData);
     
-    // Emit market data update event
+    // Emit event with market data
     this.emit('marketData', marketData);
     this.emit(`marketData:${symbol}`, marketData);
   }
@@ -172,23 +250,36 @@ export class MarketDataSubscriptionManager extends EventEmitter {
    * Handle quote message
    */
   private handleQuoteMessage(message: any): void {
-    const symbol = message.symbol;
+    const symbol = message.S; // Symbol
     
-    // Update market data cache
-    const marketData: MarketData = {
+    // Get existing market data or create new one
+    let marketData = this.marketDataBySymbol.get(symbol) || {
       symbol,
-      price: (message.bidprice + message.askprice) / 2, // Midpoint price
-      bid: message.bidprice,
-      ask: message.askprice,
-      bidSize: message.bidsize,
-      askSize: message.asksize,
-      timestamp: new Date().toISOString(),
-      source: 'quote'
-    };
+      price: 0,
+      timestamp: new Date(message.t * 1000000).toISOString(), // Timestamp (convert from nanoseconds)
+      source: 'quote',
+      bid: 0,
+      ask: 0,
+      bidSize: 0,
+      askSize: 0
+    } as MarketData;
+    
+    // Update with quote data
+    marketData.bid = parseFloat(message.bp); // Bid price
+    marketData.ask = parseFloat(message.ap); // Ask price
+    marketData.bidSize = parseInt(message.bs, 10); // Bid size
+    marketData.askSize = parseInt(message.as, 10); // Ask size
+    marketData.timestamp = new Date(message.t * 1000000).toISOString(); // Timestamp (convert from nanoseconds)
+    marketData.source = 'quote';
+    
+    // Use midpoint price if no trade price is available
+    if (!marketData.price && marketData.bid && marketData.ask) {
+      marketData.price = (marketData.bid + marketData.ask) / 2;
+    }
     
     this.marketDataBySymbol.set(symbol, marketData);
     
-    // Emit market data update event
+    // Emit event with market data
     this.emit('marketData', marketData);
     this.emit(`marketData:${symbol}`, marketData);
   }
@@ -199,6 +290,13 @@ export class MarketDataSubscriptionManager extends EventEmitter {
   private handleSubscriptionMessage(message: any): void {
     console.log('Subscription update:', message);
     this.emit('subscription', message);
+    
+    // If subscription was successful, update our active subscriptions
+    if (message.success && message.trades) {
+      message.trades.forEach((symbol: string) => {
+        this.activeSubscriptions.add(symbol);
+      });
+    }
   }
   
   /**
@@ -212,31 +310,53 @@ export class MarketDataSubscriptionManager extends EventEmitter {
   /**
    * Subscribe to a symbol
    * @param symbol - Symbol to subscribe to
+   * @param callback - Optional callback function to receive market data updates
+   * @returns A function to unsubscribe from the market data
    */
-  subscribe(symbol: string): void {
-    if (!this.wsClient || !this.connected) {
-      console.warn(`Cannot subscribe to ${symbol}: WebSocket not connected`);
-      return;
+  subscribe(symbol: string, callback?: (data: MarketData) => void): () => void {
+    // Normalize the symbol (Alpaca expects uppercase)
+    const normalizedSymbol = symbol.toUpperCase();
+    
+    // Set up the callback if provided
+    if (callback) {
+      const eventName = `marketData:${normalizedSymbol}`;
+      this.on(eventName, callback);
     }
     
-    if (this.activeSubscriptions.has(symbol)) {
-      return; // Already subscribed
+    if (!this.wsClient) {
+      // Queue subscription for when connection is established
+      this.activeSubscriptions.add(normalizedSymbol);
+      this.emit('subscriptionQueued', normalizedSymbol);
+      return () => this.unsubscribe(normalizedSymbol);
+    }
+    
+    if (this.activeSubscriptions.has(normalizedSymbol)) {
+      return () => this.unsubscribe(normalizedSymbol); // Already subscribed
     }
     
     try {
       // Subscribe to trades and quotes for this symbol
       this.wsClient.send(JSON.stringify({
         action: 'subscribe',
-        trades: [symbol],
-        quotes: [symbol]
+        trades: [normalizedSymbol],
+        quotes: [normalizedSymbol]
       }));
       
-      this.activeSubscriptions.add(symbol);
-      console.log(`Subscribed to real-time data for ${symbol}`);
-      this.emit('subscribed', symbol);
+      this.activeSubscriptions.add(normalizedSymbol);
+      console.log(`Subscribed to real-time data for ${normalizedSymbol}`);
+      this.emit('subscribed', normalizedSymbol);
+      
+      // Return an unsubscribe function
+      return () => {
+        if (callback) {
+          this.removeListener(`marketData:${normalizedSymbol}`, callback);
+        }
+        this.unsubscribe(normalizedSymbol);
+      };
     } catch (error) {
-      console.error(`Failed to subscribe to ${symbol}:`, error);
-      this.emit('subscribeError', { symbol, error });
+      console.error(`Failed to subscribe to ${normalizedSymbol}:`, error);
+      this.emit('subscribeError', { symbol: normalizedSymbol, error });
+      return () => {}; // Return a no-op function if subscription fails
     }
   }
   
@@ -245,11 +365,14 @@ export class MarketDataSubscriptionManager extends EventEmitter {
    * @param symbol - Symbol to unsubscribe from
    */
   unsubscribe(symbol: string): void {
-    if (!this.wsClient || !this.connected) {
+    // Normalize the symbol (Alpaca expects uppercase)
+    const normalizedSymbol = symbol.toUpperCase();
+    
+    if (!this.wsClient) {
       return; // Not connected, so no need to unsubscribe
     }
     
-    if (!this.activeSubscriptions.has(symbol)) {
+    if (!this.activeSubscriptions.has(normalizedSymbol)) {
       return; // Not subscribed
     }
     
@@ -257,17 +380,17 @@ export class MarketDataSubscriptionManager extends EventEmitter {
       // Unsubscribe from trades and quotes for this symbol
       this.wsClient.send(JSON.stringify({
         action: 'unsubscribe',
-        trades: [symbol],
-        quotes: [symbol]
+        trades: [normalizedSymbol],
+        quotes: [normalizedSymbol]
       }));
       
-      this.activeSubscriptions.delete(symbol);
-      this.marketDataBySymbol.delete(symbol);
-      console.log(`Unsubscribed from real-time data for ${symbol}`);
-      this.emit('unsubscribed', symbol);
+      this.activeSubscriptions.delete(normalizedSymbol);
+      this.marketDataBySymbol.delete(normalizedSymbol);
+      console.log(`Unsubscribed from real-time data for ${normalizedSymbol}`);
+      this.emit('unsubscribed', normalizedSymbol);
     } catch (error) {
-      console.error(`Failed to unsubscribe from ${symbol}:`, error);
-      this.emit('unsubscribeError', { symbol, error });
+      console.error(`Failed to unsubscribe from ${normalizedSymbol}:`, error);
+      this.emit('unsubscribeError', { symbol: normalizedSymbol, error });
     }
   }
   

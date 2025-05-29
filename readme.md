@@ -1,9 +1,10 @@
 # 🦙 Alpaca API Service
 
-A TypeScript service for interacting with the Alpaca API with enhanced features for pre-market and post-market trading, featuring real-time WebSocket-based order monitoring with sub-100ms latency.
+A TypeScript service for interacting with the Alpaca API with enhanced features for pre-market and post-market trading, featuring real-time WebSocket-based market data, orders, and positions streaming with sub-100ms latency.
 
 ## 📚 Documentation
 
+- [API Connection Guide](./docs/api-connection-guide.md)
 - [API Endpoint Management](./docs/api-endpoint-management.md)
 - [Artificial Orders](./docs/artificial-orders.md)
 
@@ -76,6 +77,10 @@ alpaca_api_service/
 
 Implements stop and stop-limit orders during pre-market and post-market hours when these order types aren't natively supported by the exchange. Features real-time WebSocket-based price monitoring with sub-100ms latency for near-instant order execution when conditions are met.
 
+### 📊 Real-Time Order & Position Tracking
+
+Receive instant updates when orders are filled, canceled, or rejected, and when positions change. This enables building reactive trading strategies that can immediately respond to market events without polling the API.
+
 ```typescript
 // Example: Creating an artificial stop order
 await fetch('/api/artificial-orders', {
@@ -93,20 +98,33 @@ await fetch('/api/artificial-orders', {
 
 ### 🔄 WebSocket Streaming
 
-Real-time updates for orders, positions, and market data via WebSocket.
+Real-time updates for market data, orders, and positions via WebSocket with sub-100ms latency.
 
 ```typescript
 // Example: Connecting to WebSocket
-const ws = new WebSocket('ws://localhost:3000/ws');
+const ws = new WebSocket('ws://localhost:9000');
 ws.onmessage = (event) => {
   const data = JSON.parse(event.data);
   console.log('Received:', data);
+  
+  // Handle different message types
+  if (data.type === 'order_update') {
+    // React to order status changes in real-time
+    if (data.payload.status === 'filled') {
+      console.log(`Order ${data.payload.id} was filled!`);
+      // Execute follow-up strategy
+    }
+  } else if (data.type === 'position_update') {
+    // React to position changes in real-time
+    console.log(`Position update for ${data.payload.symbol}`);
+  }
 };
 
 // Subscribe to updates
 ws.send(JSON.stringify({
   action: 'subscribe',
-  channel: 'orders'
+  channels: ['market_data', 'orders', 'positions'],
+  symbols: ['AAPL', 'MSFT', 'TSLA']  // Only needed for market_data
 }));
 ```
 

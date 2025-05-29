@@ -2,7 +2,32 @@
 
 ## Overview
 
-This guide explains how to connect to the Alpaca API service from external TypeScript applications running locally. It covers both REST API connections and WebSocket streaming connections.
+This guide explains how to connect to the Alpaca API service from external TypeScript applications running locally. It covers REST API connections (handled by AlpacaRestController) and WebSocket streaming for market data, orders, and positions with sub-100ms latency (handled by AlpacaWebSocketController).
+
+> **Architecture Note:** The backend has been refactored to separate REST API and WebSocket functionality into distinct controllers for better maintainability and adherence to the Single Responsibility Principle.
+
+## Architecture Overview
+
+The Alpaca API Service has been refactored to follow better separation of concerns principles:
+
+### Controller Structure
+
+1. **AlpacaRestController** (`alpaca-rest-controller.ts`)
+   - Handles all REST API endpoints for Alpaca operations
+   - Provides endpoints for account information, orders, positions, market data, etc.
+   - Focuses solely on HTTP request/response handling
+
+2. **AlpacaWebSocketController** (`alpaca-websocket-controller.ts`)
+   - Manages all WebSocket connections for real-time data
+   - Handles market data streaming with sub-100ms latency
+   - Manages order and position update subscriptions
+   - Provides real-time event notifications
+
+3. **Supporting Modules**
+   - `market-data-subscription.ts`: Manages WebSocket connections for market data
+   - `orders-positions-subscription.ts`: Handles real-time order and position updates
+
+This separation improves code maintainability, makes testing easier, and adheres to the Single Responsibility Principle.
 
 ## Prerequisites
 
@@ -178,12 +203,13 @@ export const fetchData = async () => {
 
 ## WebSocket Connection for Streaming Data
 
-For real-time updates, you can use WebSockets:
+For real-time updates, you can use WebSockets to connect to the AlpacaWebSocketController:
 
 ```typescript
 /**
  * websocket-client.ts
  * A client for streaming real-time data from the Alpaca API service
+ * Connects to the AlpacaWebSocketController for real-time updates
  */
 
 // Configure the WebSocket URL
@@ -351,10 +377,29 @@ const wsClient = new AlpacaWebSocketClient();
 // Set up callbacks
 wsClient.onOrderUpdate((order) => {
   console.log('Order update:', order);
+  
+  // React to order status changes in real-time
+  if (order.status === 'filled') {
+    console.log(`Order ${order.id} was filled at ${order.filled_avg_price}!`);
+    // Trigger any actions that should happen when an order is filled
+  } else if (order.status === 'canceled') {
+    console.log(`Order ${order.id} was canceled`);
+    // Handle canceled orders
+  }
 });
 
 wsClient.onPositionUpdate((position) => {
   console.log('Position update:', position);
+  
+  // React to position changes in real-time
+  const unrealizedPL = parseFloat(position.unrealized_pl);
+  if (unrealizedPL > 1000) {
+    console.log(`Large unrealized profit of $${unrealizedPL} on ${position.symbol}`);
+    // Consider taking profits
+  } else if (unrealizedPL < -500) {
+    console.log(`Large unrealized loss of $${Math.abs(unrealizedPL)} on ${position.symbol}`);
+    // Consider cutting losses
+  }
 });
 
 // Connect to the WebSocket server
@@ -374,7 +419,7 @@ export default wsClient;
 
 ```json
 {
-  "type": "order",
+  "type": "order_update",
   "payload": {
     "id": "61e69015-8549-4bfd-b9c3-01e75843f47d",
     "client_order_id": "eb9e2aaa-f71a-4f51-b5b4-52a6c565dad4",
@@ -414,7 +459,7 @@ export default wsClient;
 
 ```json
 {
-  "type": "position",
+  "type": "position_update",
   "payload": {
     "asset_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
     "symbol": "AAPL",
@@ -468,6 +513,65 @@ export default wsClient;
     "source": "order-service"
   }
 }
+```
+
+## Real-Time Orders and Positions Streaming
+
+The Alpaca API service now provides real-time updates for orders and positions via WebSocket with sub-100ms latency. This allows your application to react immediately to changes in order status or position values.
+
+## Benefits of the Refactored Architecture
+
+The separation of REST API and WebSocket functionality into dedicated controllers offers several advantages:
+
+### Improved Maintainability
+- **Focused Responsibility**: Each controller has a clear, single responsibility
+- **Reduced Complexity**: Smaller, more focused files are easier to understand and modify
+- **Better Testing**: Isolated components are easier to test independently
+
+### Enhanced Performance
+- **Optimized WebSocket Handling**: Dedicated WebSocket controller for better real-time performance
+- **Reduced Memory Footprint**: More efficient resource usage with specialized components
+- **Improved Error Isolation**: Issues in one component don't affect others
+
+### Better Developer Experience
+- **Clearer Code Organization**: Easier to find relevant code for specific tasks
+- **Simplified Onboarding**: New developers can understand the system more quickly
+- **Easier Debugging**: Problems can be isolated to specific controllers
+
+This refactoring follows the SOLID principles, particularly the Single Responsibility Principle, resulting in a more robust and maintainable codebase.
+
+### Key Benefits
+
+- **Sub-100ms Latency**: Receive updates almost instantly when orders are filled or positions change
+- **Event-Driven Architecture**: React to events as they happen rather than polling for updates
+- **Reduced API Load**: Eliminates the need for frequent REST API calls to check order status
+- **Improved Trading Strategies**: Implement time-sensitive strategies that depend on quick order execution confirmation
+
+### Implementation Details
+
+The system maintains a persistent WebSocket connection to Alpaca's streaming API and forwards updates to your client application. When you subscribe to the `orders` or `positions` channels, you'll receive real-time updates whenever:
+
+- An order is created, filled, partially filled, canceled, or rejected
+- A position is opened, closed, or its value changes
+
+### Example Implementation
+
+Here's how to implement a handler for order status changes that takes action when an order is filled:
+
+```typescript
+wsClient.onOrderUpdate((order) => {
+  if (order.status === 'filled') {
+    // Order was filled, execute follow-up strategy
+    if (order.side === 'buy') {
+      // Set up a trailing stop loss for the new position
+      createTrailingStopOrder(order.symbol, order.filled_qty, 5.0); // 5% trailing stop
+    }
+  } else if (order.status === 'rejected') {
+    // Handle rejected orders
+    console.error(`Order rejected: ${order.id}`, order);
+    notifyTradingTeam(`Order for ${order.symbol} was rejected`);
+  }
+});
 ```
 
 ## Crypto Market Data Streaming

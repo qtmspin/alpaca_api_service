@@ -83,6 +83,7 @@ export class ArtificialOrderManager extends EventEmitter {
   private orders: Map<string, ArtificialOrder> = new Map();
   private monitoringInterval: NodeJS.Timeout | null = null;
   private priceCheckIntervalMs: number;
+  private marketDataManager: MarketDataSubscriptionManager | null = null;
 
   constructor(priceCheckIntervalMs: number = 5000) {
     super();
@@ -250,38 +251,45 @@ export class ArtificialOrderManager extends EventEmitter {
     return triggeredOrders;
   }
 
-  // Market data subscription manager
-  private marketDataManager: MarketDataSubscriptionManager | null = null;
+  // Market data subscription manager for real-time price monitoring
+  private marketDataSubscriptionManager: MarketDataSubscriptionManager | null = null;
 
   /**
    * Start monitoring for order triggers using WebSocket feed
+   * @param wsClient Optional WebSocket client to use for market data
+   * @param marketDataManager Optional MarketDataSubscriptionManager instance to use
    */
-  startMonitoring(wsClient?: any): void {
-    if (this.monitoringInterval) {
-      return; // Already monitoring
+  startMonitoring(wsClient?: any, marketDataManager?: MarketDataSubscriptionManager): void {
+    if (this.isMonitoring()) {
+      console.log('Monitoring already active');
+      return;
     }
     
-    // Initialize market data subscription manager if not already initialized
-    if (!this.marketDataManager) {
-      this.marketDataManager = new MarketDataSubscriptionManager();
-      
-      // Set up event listener for market data updates
-      this.marketDataManager.on('marketData', (marketData: MarketData) => {
+    // Initialize or use provided market data manager
+    if (marketDataManager) {
+      this.marketDataSubscriptionManager = marketDataManager;
+    } else if (!this.marketDataSubscriptionManager) {
+      this.marketDataSubscriptionManager = new MarketDataSubscriptionManager();
+    }
+    
+    // Set up event listener for market data updates
+    if (this.marketDataSubscriptionManager) {
+      this.marketDataSubscriptionManager.on('marketData', (marketData: MarketData) => {
         // Process any pending orders for this symbol when market data is received
         this.processMarketData(marketData.symbol, { 
           price: marketData.price, 
           volume: marketData.volume 
         });
       });
-    }
-    
-    // Initialize the market data manager with the WebSocket client if provided
-    if (wsClient) {
-      this.marketDataManager.initialize(wsClient);
+      
+      // Initialize the market data manager with the WebSocket client if provided
+      if (wsClient && this.marketDataSubscriptionManager) {
+        this.marketDataSubscriptionManager.initialize(wsClient, 'artificial-orders');
+      }
     }
     
     // Check if the market data manager is connected
-    if (!this.marketDataManager.isConnected()) {
+    if (this.marketDataSubscriptionManager && !this.marketDataSubscriptionManager.isConnected()) {
       console.warn('WebSocket client not available. Real-time monitoring will be limited.');
       // Continue without WebSocket - we'll rely on the interval-based safety net
     }
@@ -295,7 +303,8 @@ export class ArtificialOrderManager extends EventEmitter {
       this.emit('monitoring', {
         timestamp: new Date().toISOString(),
         pendingOrders: this.getOrdersByStatus('pending').length,
-        activeSubscriptions: this.marketDataManager ? this.marketDataManager.getActiveSubscriptions() : []
+        activeSubscriptions: this.marketDataManager && this.marketDataManager.isConnected() ? 
+          this.marketDataManager.getActiveSubscriptions() : []
       });
     }, 30000); // Check subscriptions every 30 seconds
     

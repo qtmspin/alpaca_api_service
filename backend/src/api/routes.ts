@@ -17,7 +17,7 @@ import { OrderController } from './order-controller.js';
 import { PositionController } from './position-controller.js';
 import { MarketDataController } from './market-data-controller.js';
 import { ArtificialOrdersController } from './artificial-orders-controller.js';
-import { AlpacaController } from './alpaca-controller.js';
+import { AlpacaRestController } from './alpaca-rest-controller.js';
 import { ConfigManager, ArtificialOrderManager } from '../core/index.js';
 import { AlpacaClient } from '../services/alpaca-client.js';
 
@@ -48,7 +48,7 @@ export function setupApiRoutes(
     config.runtime,
     alpacaClient
   );
-  const alpacaController = new AlpacaController(alpacaClient);
+  const alpacaController = new AlpacaRestController(alpacaClient);
   
   // Set up API routes
   app.use('/api/alpaca', alpacaController.getRouter());
