@@ -1,5 +1,6 @@
 /**
  * ConnectionStatus.tsx
+ * Fixed version with proper API credential handling
  * Displays detailed connection status information for Alpaca API and client
  * Shows connection state, authentication status, and last update times
  * Provides a compact, table-like interface with draggable connection logs
@@ -15,6 +16,12 @@ import './ConnectionStatus.css'
 const ConnectionStatus = () => {
   const { wsConnection, alpacaStatus, clientStatus, logs, setLogs } = useAppStore()
   const [isConnecting, setIsConnecting] = useState(false)
+  const [showCredentialsModal, setShowCredentialsModal] = useState(false)
+  const [credentials, setCredentials] = useState({
+    apiKey: '',
+    secretKey: '',
+    isPaper: true
+  })
   const [isLoading, setIsLoading] = useState({
     account: false,
     positions: false,
@@ -32,6 +39,19 @@ const ConnectionStatus = () => {
   const dragStartY = useRef(0)
   const dragStartHeight = useRef(0)
   
+  // Load saved credentials from localStorage on component mount
+  useEffect(() => {
+    const savedCredentials = localStorage.getItem('alpacaCredentials')
+    if (savedCredentials) {
+      try {
+        const parsed = JSON.parse(savedCredentials)
+        setCredentials(parsed)
+      } catch (e) {
+        console.error('Error parsing saved credentials:', e)
+      }
+    }
+  }, [])
+  
   // Filter logs related to connection status
   useEffect(() => {
     const connectionLogs = logs
@@ -48,13 +68,26 @@ const ConnectionStatus = () => {
   }, [logs])
 
   const handleConnect = async () => {
+    if (!credentials.apiKey || !credentials.secretKey) {
+      setShowCredentialsModal(true)
+      return
+    }
+
     try {
       setIsConnecting(true)
-      const response = await axios.post('/api/alpaca/connect')
-      addLog('Connected to Alpaca API')
+      const response = await axios.post('/api/alpaca/connect', {
+        apiKey: credentials.apiKey,
+        secretKey: credentials.secretKey,
+        isPaper: credentials.isPaper
+      })
       
-      // Manually update the status immediately
       if (response.data.success) {
+        addLog('Connected to Alpaca API successfully')
+        
+        // Save credentials to localStorage for future use
+        localStorage.setItem('alpacaCredentials', JSON.stringify(credentials))
+        
+        // Manually update the status immediately
         useAppStore.setState({
           alpacaStatus: {
             ...alpacaStatus,
@@ -68,13 +101,27 @@ const ConnectionStatus = () => {
             lastUpdated: new Date().toISOString()
           }
         })
+      } else {
+        throw new Error(response.data.message || 'Failed to connect')
       }
     } catch (error) {
       console.error('Error connecting to Alpaca:', error)
-      addLog(`Error connecting to Alpaca: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      addLog(`Error connecting to Alpaca: ${errorMessage}`)
+      
+      // If it's an authentication error, show credentials modal
+      if (errorMessage.includes('401') || errorMessage.includes('credentials') || errorMessage.includes('API key')) {
+        setShowCredentialsModal(true)
+      }
     } finally {
       setIsConnecting(false)
     }
+  }
+
+  const handleCredentialsSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setShowCredentialsModal(false)
+    await handleConnect()
   }
 
   const addLog = (message: string) => {
@@ -225,6 +272,75 @@ const ConnectionStatus = () => {
   return (
     <div className="flex flex-col h-full p-4">
       <h2 className="text-xl font-semibold mb-4">Connection Status</h2>
+      
+      {/* Credentials Modal */}
+      {showCredentialsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg w-96 p-6">
+            <h3 className="text-lg font-semibold mb-4">Alpaca API Credentials</h3>
+            
+            <form onSubmit={handleCredentialsSubmit}>
+              <div className="mb-4">
+                <label htmlFor="apiKey" className="block text-sm font-medium mb-2">
+                  API Key
+                </label>
+                <input
+                  type="text"
+                  id="apiKey"
+                  value={credentials.apiKey}
+                  onChange={(e) => setCredentials(prev => ({ ...prev, apiKey: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+                  placeholder="PKTEST..."
+                  required
+                />
+              </div>
+              
+              <div className="mb-4">
+                <label htmlFor="secretKey" className="block text-sm font-medium mb-2">
+                  Secret Key
+                </label>
+                <input
+                  type="password"
+                  id="secretKey"
+                  value={credentials.secretKey}
+                  onChange={(e) => setCredentials(prev => ({ ...prev, secretKey: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white"
+                  placeholder="Your secret key"
+                  required
+                />
+              </div>
+              
+              <div className="mb-6">
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={credentials.isPaper}
+                    onChange={(e) => setCredentials(prev => ({ ...prev, isPaper: e.target.checked }))}
+                    className="mr-2"
+                  />
+                  <span className="text-sm">Use Paper Trading (Recommended)</span>
+                </label>
+              </div>
+              
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCredentialsModal(false)}
+                  className="flex-1 px-4 py-2 bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-white rounded hover:bg-gray-300 dark:hover:bg-gray-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                  Connect
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
       
       {/* Orders Modal */}
       {showOrdersModal && (
@@ -405,11 +521,13 @@ const ConnectionStatus = () => {
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={handleConnect}
-                    disabled={isConnecting || alpacaStatus.connected}
+                    disabled={isConnecting}
                     className={`px-3 py-1 text-xs rounded-md ${
-                      isConnecting || alpacaStatus.connected 
+                      isConnecting
                         ? 'bg-gray-300 dark:bg-gray-600 cursor-not-allowed' 
-                        : 'bg-blue-600 hover:bg-blue-700 text-white'
+                        : alpacaStatus.connected
+                          ? 'bg-green-600 hover:bg-green-700 text-white'
+                          : 'bg-blue-600 hover:bg-blue-700 text-white'
                     }`}
                   >
                     {isConnecting ? 'Connecting...' : alpacaStatus.connected ? 'Connected' : 'Connect'}

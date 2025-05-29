@@ -25,6 +25,9 @@ async function loadAlpacaSDK() {
 }
 
 export interface AlpacaClientInterface {
+  // Configuration method
+  getConfig(): AlpacaConfig;
+
   // Account methods
   getAccount(): Promise<any>;
   
@@ -505,6 +508,19 @@ export class AlpacaClient implements AlpacaClientInterface {
       console.error('Error deleting watchlist:', error);
       throw this.handleApiError(error, 'Failed to delete watchlist');
     }
+  }
+
+  /**
+   * Get the current configuration
+   * @returns The Alpaca configuration object
+   */
+  getConfig(): AlpacaConfig {
+    return {
+      apiKey: this.config.apiKey,
+      secretKey: this.config.secretKey,
+      isPaper: this.config.isPaper,
+      baseUrl: this.config.baseUrl
+    };
   }
 
   /**

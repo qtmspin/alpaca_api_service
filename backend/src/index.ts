@@ -13,228 +13,179 @@
  * - Set up WebSocket server with global reference
  */
 
-import express from 'express';
-import cors from 'cors';
-import helmet from 'helmet';
-import { ConfigManager, ArtificialOrderManager } from './core/index.js';
-import { setupApiRoutes } from './api/routes.js';
-import { createAlpacaClient } from './services/alpaca-client.js';
-import { setupWebSocketServer } from './services/websocket-server.js';
-import path from 'path';
-import { Server } from 'http';
-import WebSocket from 'ws';
+/**
+ * Fixed backend initialization with proper error handling and CORS
+ * Location: backend/src/index.ts
+ */
 
-// Declare global WebSocket server
-declare global {
-  var wss: any | undefined;
-}
+import express from 'express'
+import cors from 'cors'
+import { createServer } from 'http'
+import { ConfigManager } from './core/index.js'
+import { setupApiRoutes } from './api/routes.js'
+import { setupWebSocketServer } from './services/websocket-server.js'
+import { ArtificialOrderManager } from './core/artificial-orders.js'
+import { AlpacaClient } from './services/alpaca-client.js';
 
-// Use the current working directory for config path
-const currentDir = process.cwd();
+const app = express()
+let server: any = null
 
-// Initialize configuration manager
-const configPath = path.join(currentDir, 'config', 'config.json');
-console.log(`Config path: ${configPath}`);
-
-const configManager = new ConfigManager(configPath);
-
-// Initialize Express app
-const app = express();
-
-// Apply middleware
-app.use(helmet({
-  crossOriginEmbedderPolicy: false, // Allow WebSocket connections
-}));
+// Enable CORS for all routes - this fixes WebSocket connection issues
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:5173'], // Common dev ports
+  origin: ['http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:3000', 'http://127.0.0.1:5173'],
   credentials: true
-}));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+}))
 
-// Add request logging
+// Parse JSON bodies
+app.use(express.json())
+
+// Request logging middleware
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  next();
-});
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`)
+  next()
+})
 
-// Load configuration
-async function initializeServer() {
+async function initializeServices() {
   try {
-    console.log('Starting server initialization...');
+    console.log('🚀 Starting Alpaca API Service...')
     
-    // Check if config file exists
+    // Initialize configuration manager
+    const configManager = new ConfigManager('./config/config.json')
+    
+    // Try to load existing config, create default if it doesn't exist
+    let config
     try {
-      const fs = await import('fs/promises');
-      await fs.access(configPath);
-      console.log('Config file exists and is accessible');
+      config = await configManager.loadConfig()
+      console.log('✅ Configuration loaded successfully')
     } catch (error) {
-      console.error('Config file not found, creating default config...');
-      await configManager.createDefaultConfig();
+      console.log('⚠️  No configuration found, creating default...')
+      config = await configManager.createDefaultConfig()
+      console.log('✅ Default configuration created')
     }
     
-    // Load configuration
-    const config = await configManager.loadConfig();
-    console.log('Configuration loaded successfully');
-    console.log('API Port:', config.startup.apiPort);
-    console.log('Paper Trading:', config.runtime.alpaca.isPaper);
+    // Initialize Alpaca client (but don't connect until credentials are provided)
+    console.log('🦙 Initializing Alpaca client...')
+    let alpacaClient: AlpacaClient | null = null
     
-    // Initialize Alpaca client
-    console.log('Initializing Alpaca client...');
-    const alpacaClient = await createAlpacaClient(config.runtime.alpaca);
-    console.log('Alpaca client initialized');
+    // Only initialize if we have credentials
+    if (config.runtime.alpaca.apiKey && config.runtime.alpaca.secretKey) {
+      try {
+        alpacaClient = new AlpacaClient(config.runtime.alpaca)
+        await alpacaClient.initClient()
+        console.log('✅ Alpaca client connected successfully')
+      } catch (error) {
+        console.log('⚠️  Alpaca client connection failed (will need to connect via UI):', error instanceof Error ? error.message : 'Unknown error')
+        // Create a client but don't initialize it yet
+        alpacaClient = new AlpacaClient({
+          apiKey: '',
+          secretKey: '',
+          isPaper: true
+        })
+      }
+    } else {
+      console.log('⚠️  No Alpaca credentials found (will need to connect via UI)')
+      // Create a client but don't initialize it yet
+      alpacaClient = new AlpacaClient({
+        apiKey: '',
+        secretKey: '',
+        isPaper: true
+      })
+    }
     
     // Initialize artificial order manager
-    const orderManager = new ArtificialOrderManager(
-      config.runtime.monitoring.priceCheckIntervalMs
-    );
-    console.log('Artificial order manager initialized');
+    console.log('🎯 Initializing artificial order manager...')
+    const orderManager = new ArtificialOrderManager()
+    console.log('✅ Artificial order manager initialized')
     
     // Set up API routes
-    setupApiRoutes(app, configManager, alpacaClient, orderManager);
-    console.log('API routes configured');
+    console.log('🌐 Setting up API routes...')
+    setupApiRoutes(app, configManager, alpacaClient, orderManager)
+    console.log('✅ API routes configured')
     
-    // Add a root route
-    app.get('/', (req, res) => {
-      res.json({
-        service: 'Alpaca API Service',
-        status: 'running',
-        version: '1.0.0',
-        timestamp: new Date().toISOString(),
-        endpoints: {
-          health: '/api/health',
-          config: '/api/config',
-          account: '/api/account',
-          orders: '/api/orders',
-          positions: '/api/positions',
-          market: '/api/market',
-          alpaca: '/api/alpaca',
-          'artificial-orders': '/api/artificial-orders'
-        }
-      });
-    });
+    // Create HTTP server
+    server = createServer(app)
     
-    // Start the API server
-    const apiPort = config.startup.apiPort;
-    const apiServer = app.listen(apiPort, '0.0.0.0', () => {
-      console.log(`🚀 API server listening on http://localhost:${apiPort}`);
-      console.log(`📊 WebSocket server will be available on ws://localhost:${apiPort}`);
-    });
+    // Set up WebSocket server
+    console.log('🔌 Setting up WebSocket server...')
+    const wsServer = setupWebSocketServer(server, alpacaClient, orderManager)
+    console.log('✅ WebSocket server configured')
     
-    // Set up WebSocket server for real-time updates
-    const wsServer = setupWebSocketServer(apiServer, alpacaClient, orderManager);
-    console.log('✅ WebSocket server initialized');
+    // Start the artificial order manager with the WebSocket client
+    console.log('🔄 Starting artificial order monitoring...')
+    // Get the market data manager from the WebSocket controller
+    if (global.wss && wsServer) {
+      // Get the market data subscription manager from the Alpaca WebSocket controller
+      const alpacaController = (wsServer as any).alpacaWebSocketController;
+      if (alpacaController && alpacaController.marketDataManager) {
+        // Start monitoring with the market data manager
+        orderManager.startMonitoring(null, alpacaController.marketDataManager);
+        console.log('✅ Artificial order monitoring started with WebSocket')
+      } else {
+        console.warn('⚠️ WebSocket controller not properly initialized, falling back to interval-based monitoring')
+        orderManager.startMonitoring();
+      }
+    } else {
+      console.warn('⚠️ WebSocket server not initialized, artificial orders will use interval-based monitoring')
+      // Start monitoring without WebSocket
+      orderManager.startMonitoring();
+    }
     
-    // WebSocketServer constructor already sets global.wss
-    
-    // Log successful startup
-    console.log('\n🎉 Server initialization completed successfully!');
-    console.log(`📡 API Base URL: http://localhost:${apiPort}`);
-    console.log(`🔄 WebSocket URL: ws://localhost:${apiPort}`);
-    console.log('\n📋 Available endpoints:');
-    console.log(`   GET  /                          - Service info`);
-    console.log(`   GET  /api/health                - Health check`);
-    console.log(`   GET  /api/alpaca/market-data/:symbol - Market data`);
-    console.log(`   GET  /api/alpaca/price-history/:symbol - Price history`);
-    console.log(`   POST /api/alpaca/connect        - Connect to Alpaca`);
-    console.log(`   WS   ws://localhost:${apiPort}     - WebSocket endpoint`);
-    
-    // Handle graceful shutdown
-    process.on('SIGINT', () => gracefulShutdown(apiServer, wsServer, orderManager));
-    process.on('SIGTERM', () => gracefulShutdown(apiServer, wsServer, orderManager));
-    
-    // Handle uncaught exceptions
-    process.on('uncaughtException', (error) => {
-      console.error('❌ Uncaught Exception:', error);
-      gracefulShutdown(apiServer, wsServer, orderManager);
-    });
-    
-    process.on('unhandledRejection', (reason, promise) => {
-      console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
-      gracefulShutdown(apiServer, wsServer, orderManager);
-    });
+    // Start server
+    const port = config.startup.apiPort || 9000
+    server.listen(port, () => {
+      console.log('🎉 Alpaca API Service started successfully!')
+      console.log(`📡 HTTP Server: http://localhost:${port}`)
+      console.log(`🔌 WebSocket Server: ws://localhost:${port}`)
+      console.log('')
+      console.log('📋 Available endpoints:')
+      console.log('  - GET  /api/health           Health check')
+      console.log('  - POST /api/alpaca/connect   Connect to Alpaca API')
+      console.log('  - GET  /api/alpaca/account   Get account info')
+      console.log('  - GET  /api/alpaca/positions Get positions')
+      console.log('  - GET  /api/alpaca/orders    Get orders')
+      console.log('  - POST /api/orders           Create order')
+      console.log('  - GET  /api/config           Get configuration')
+      console.log('  - PUT  /api/config           Update configuration')
+      console.log('')
+      if (!config.runtime.alpaca.apiKey) {
+        console.log('⚠️  Please connect to Alpaca API via the UI to start trading')
+      }
+    })
     
   } catch (error) {
-    console.error('❌ Failed to initialize server:', error);
-    
-    // More detailed error logging
-    if (error instanceof Error) {
-      console.error('Error name:', error.name);
-      console.error('Error message:', error.message);
-      console.error('Error stack:', error.stack);
-    }
-    
-    process.exit(1);
+    console.error('❌ Failed to initialize services:', error)
+    process.exit(1)
   }
 }
 
-// Graceful shutdown function
-function gracefulShutdown(
-  apiServer: Server,
-  wsServer: any,
-  orderManager: ArtificialOrderManager
-) {
-  console.log('\n🛑 Shutting down gracefully...');
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('\n🛑 Shutting down gracefully...')
   
-  // Stop the artificial order monitoring
-  orderManager.stopMonitoring();
-  console.log('✅ Artificial order monitoring stopped');
-  
-  // Close the WebSocket server
-  if (wsServer && typeof wsServer.close === 'function') {
-    wsServer.close();
-    console.log('✅ WebSocket server closed');
+  if (server) {
+    server.close(() => {
+      console.log('✅ HTTP server closed')
+      process.exit(0)
+    })
+  } else {
+    process.exit(0)
   }
-  
-  // Close the API server
-  apiServer.close(() => {
-    console.log('✅ API server closed');
-    console.log('👋 Goodbye!');
-    process.exit(0);
-  });
-  
-  // Force exit after 10 seconds if graceful shutdown fails
-  setTimeout(() => {
-    console.error('⚠️  Forced shutdown after timeout');
-    process.exit(1);
-  }, 10000);
-}
+})
 
-// Start the server
-console.log('🚀 Starting Alpaca API Service...');
-console.log(`📅 ${new Date().toISOString()}`);
-console.log(`📂 Working directory: ${process.cwd()}`);
-console.log(`🔧 Node version: ${process.version}`);
+// Handle unhandled rejections
+process.on('unhandledRejection', (error) => {
+  console.error('❌ Unhandled rejection:', error)
+  process.exit(1)
+})
 
-// Add a simple health check endpoint that doesn't require initialization
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString()
-  });
-});
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught exception:', error)
+  process.exit(1)
+})
 
-// Start listening on a basic port for health checks
-const healthCheckPort = 3456;
-const healthServer = app.listen(healthCheckPort, () => {
-  console.log(`Health check server running at http://localhost:${healthCheckPort}/health`);
-});
-
-// Initialize the main server
-initializeServer()
-  .then(() => {
-    console.log('Server initialization completed successfully!');
-  })
-  .catch(error => {
-    console.error('💥 Fatal initialization error:', error);
-    // Print more detailed error information
-    if (error instanceof Error) {
-      console.error('Error name:', error.name);
-      console.error('Error message:', error.message);
-      console.error('Error stack:', error.stack);
-    } else {
-      console.error('Unknown error type:', typeof error);
-      console.error('Error value:', error);
-    }
-    process.exit(1);
-  });
+// Start the application
+initializeServices().catch((error) => {
+  console.error('❌ Failed to start application:', error)
+  process.exit(1)
+})

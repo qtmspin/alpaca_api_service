@@ -25,7 +25,8 @@ export class WebSocketServer {
   private wss: WSServer;
   private subscriptions: Map<WebSocket, Set<string>> = new Map();
   private liveStreamIntervals: Map<string, NodeJS.Timeout> = new Map();
-  private alpacaWebSocketController: AlpacaWebSocketController;
+  // Make this public so it can be accessed from outside
+  public alpacaWebSocketController: AlpacaWebSocketController;
   
   /**
    * Constructor for WebSocketServer
@@ -41,6 +42,11 @@ export class WebSocketServer {
     // Create WebSocket server
     this.wss = new WSServer({ server });
     
+    // Expose globally for access from other parts of the application
+    // IMPORTANT: Do this before initializing the AlpacaWebSocketController
+    // to prevent duplicate event handlers
+    global.wss = this.wss;
+    
     // Initialize the Alpaca WebSocket controller
     this.alpacaWebSocketController = new AlpacaWebSocketController(alpacaClient);
     
@@ -49,9 +55,6 @@ export class WebSocketServer {
     
     // Set up heartbeat
     this.setupHeartbeat();
-    
-    // Expose globally for access from other parts of the application
-    global.wss = this.wss;
   }
   
   /**

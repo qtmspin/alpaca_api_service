@@ -18,6 +18,7 @@ import WebSocket from 'ws';
  * Order update data structure
  */
 export interface OrderUpdate {
+  // Standard Alpaca order properties
   id: string;
   client_order_id: string;
   created_at: string;
@@ -49,6 +50,32 @@ export interface OrderUpdate {
   hwm: string | null;
   subtag: string | null;
   source: string | null;
+  
+  // Additional properties for WebSocket events
+  event?: string;                    // Event type from WebSocket stream
+  position_qty?: string;             // Current position quantity after order execution
+  
+  // Properties for fill events
+  fill_price?: string;               // Price at which the order was filled
+  fill_qty?: string;                 // Quantity that was filled
+  fill_timestamp?: string;           // Timestamp when the fill occurred
+  
+  // Properties for cancel events
+  cancel_timestamp?: string;         // Timestamp when the order was canceled
+  
+  // Properties for expiration events
+  expiration_timestamp?: string;     // Timestamp when the order expired
+  
+  // Properties for replace events
+  replace_timestamp?: string;        // Timestamp when the order was replaced
+  
+  // Properties for rejection events
+  reject_timestamp?: string;         // Timestamp when the order was rejected
+  reject_reason?: string;           // Reason for order rejection
+  reason?: string;                  // Alternative field for rejection reason
+  
+  // General event timestamp for other event types
+  event_timestamp?: string;          // Timestamp for other event types
 }
 
 /**
@@ -260,35 +287,111 @@ export class OrdersPositionsSubscriptionManager extends EventEmitter {
   
   /**
    * Handle order update message
+   * Processes all order event types from Alpaca's WebSocket stream
    */
   private handleOrderUpdate(data: any): void {
-    // Process order update
-    const orderUpdate: OrderUpdate = data.order;
-    const event = data.event;
+    if (!data || !data.order) {
+      console.error('Invalid order update data:', data);
+      return;
+    }
     
-    // Emit event with order update
+    const order = data.order;
+    const eventType = data.event;
+    
+    console.log(`Received order update: ${eventType} for ${order.symbol}`);
+    
+    // Create base order update object
+    const orderUpdate: OrderUpdate = {
+      ...order,
+      event: eventType
+    };
+    
+    // Add event-specific fields based on event type
+    switch (eventType) {
+      case 'fill':
+        // Complete fill event
+        orderUpdate.fill_timestamp = data.timestamp || new Date().toISOString();
+        orderUpdate.fill_price = data.price;
+        orderUpdate.fill_qty = data.qty;
+        orderUpdate.position_qty = data.position_qty;
+        break;
+        
+      case 'partial_fill':
+        // Partial fill event
+        orderUpdate.fill_timestamp = data.timestamp || new Date().toISOString();
+        orderUpdate.fill_price = data.price;
+        orderUpdate.fill_qty = data.qty;
+        orderUpdate.position_qty = data.position_qty;
+        break;
+        
+      case 'canceled':
+        // Order canceled event
+        orderUpdate.cancel_timestamp = data.timestamp || order.canceled_at || new Date().toISOString();
+        break;
+        
+      case 'expired':
+        // Order expired event
+        orderUpdate.expiration_timestamp = data.timestamp || order.expired_at || new Date().toISOString();
+        break;
+        
+      case 'replaced':
+        // Order replaced event
+        orderUpdate.replace_timestamp = data.timestamp || order.replaced_at || new Date().toISOString();
+        break;
+        
+      case 'rejected':
+        // Order rejected event
+        orderUpdate.reject_timestamp = data.timestamp || order.failed_at || new Date().toISOString();
+        orderUpdate.reject_reason = order.reason || 'Unknown';
+        break;
+        
+      case 'done_for_day':
+      case 'stopped':
+      case 'pending_new':
+      case 'pending_cancel':
+      case 'pending_replace':
+      case 'calculated':
+      case 'suspended':
+      case 'order_replace_rejected':
+      case 'order_cancel_rejected':
+        // Handle less common events
+        orderUpdate.event_timestamp = new Date().toISOString();
+        break;
+        
+      default:
+        // New orders and other events
+        break;
+    }
+    
+    // Emit order update event with all the details
     this.emit('orderUpdate', orderUpdate);
     
-    // Also emit a specific event for the order status
-    this.emit(`order:${orderUpdate.status}`, orderUpdate);
-    
-    console.log(`Order update received: ${orderUpdate.id} - ${orderUpdate.status} (${event})`);
-    
-    // If this is a fill or partial_fill event and we're subscribed to positions,
-    // we should trigger a position update
-    if (this.subscribed.positions && (event === 'fill' || event === 'partial_fill')) {
-      // We'll emit the position data that comes with the order update
-      // This includes position_qty which is the new position size
-      if (data.position_qty !== undefined) {
+    // If order is filled or partially filled, emit position update
+    if (eventType === 'fill' || eventType === 'partial_fill') {
+      if (data.position_qty) {
         const positionUpdate: Partial<PositionUpdate> = {
           symbol: orderUpdate.symbol,
           qty: data.position_qty.toString(),
           side: parseFloat(data.position_qty) > 0 ? 'long' : 'short',
-          timestamp: data.timestamp || new Date().toISOString()
+          avg_entry_price: orderUpdate.filled_avg_price || '0',
+          market_value: orderUpdate.filled_avg_price ? 
+            (parseFloat(orderUpdate.filled_avg_price) * parseFloat(data.position_qty)).toString() : '0',
+          timestamp: data.timestamp || new Date().toISOString(),
+          asset_id: orderUpdate.asset_id,
+          asset_class: orderUpdate.asset_class,
+          exchange: '',  // Required by interface but not available in order data
+          cost_basis: '0', // Not available in order data
+          unrealized_pl: '0', // Not available in order data
+          unrealized_plpc: '0', // Not available in order data
+          unrealized_intraday_pl: '0', // Not available in order data
+          unrealized_intraday_plpc: '0', // Not available in order data
+          current_price: orderUpdate.filled_avg_price || '0',
+          lastday_price: '0', // Not available in order data
+          change_today: '0'  // Not available in order data
         };
         
         // Emit position update event
-        this.emit('positionUpdate', positionUpdate);
+        this.emit('positionUpdate', positionUpdate as PositionUpdate);
         console.log(`Position update emitted for ${positionUpdate.symbol}: ${positionUpdate.qty}`);
       }
     }

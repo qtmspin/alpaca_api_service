@@ -1,6 +1,8 @@
 {
   "dependencies": {
     "@alpacahq/typescript-sdk": "^0.0.31-preview",
+    "@types/cors": "^2.8.18",
+    "cors": "^2.8.5",
     "recharts": "^2.15.3"
   }
 }

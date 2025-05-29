@@ -1,12 +1,12 @@
 /**
- * alpaca-rest-controller.ts
+ * alpaca-rest-controller.ts - Fixed version
  * 
  * This file handles REST API endpoints for Alpaca API operations.
  * Location: backend/src/api/alpaca-rest-controller.ts
  * 
  * Responsibilities:
  * - Provide REST API endpoints for Alpaca API operations
- * - Handle connection to Alpaca API
+ * - Handle connection to Alpaca API with proper error handling
  * - Process market data and account information requests
  */
 
@@ -16,7 +16,7 @@ import { createServerError } from '../core/errors.js';
 
 /**
  * AlpacaRestController
- * Handles Alpaca API REST endpoints
+ * Handles Alpaca API REST endpoints with improved error handling
  */
 export class AlpacaRestController {
   private router: Router;
@@ -42,14 +42,18 @@ export class AlpacaRestController {
   }
 
   /**
-   * Connect to Alpaca API
+   * Connect to Alpaca API with proper validation and error handling
    */
   private async connect(req: Request, res: Response): Promise<void> {
     try {
+      console.log('📡 Attempting to connect to Alpaca API...');
+      
       // Get API credentials from request body
       const { apiKey, secretKey, isPaper = true } = req.body;
       
+      // Validate required fields
       if (!apiKey || !secretKey) {
+        console.log('❌ Missing API credentials in request');
         res.status(400).json({
           success: false,
           message: 'API key and secret key are required'
@@ -57,40 +61,122 @@ export class AlpacaRestController {
         return;
       }
       
-      // Initialize Alpaca client with provided credentials
+      // Validate API key format
+      if (!apiKey.startsWith('PK') && !apiKey.startsWith('APCA')) {
+        console.log('⚠️  API key format appears invalid');
+        res.status(400).json({
+          success: false,
+          message: 'Invalid API key format. Expected format: PK... (paper) or APCA... (live)'
+        });
+        return;
+      }
+      
+      console.log(`🔑 Connecting with API key: ${apiKey.substring(0, 8)}... (${isPaper ? 'Paper' : 'Live'} trading)`);
+      
       try {
-        await this.alpacaClient.initClient();
+        // Update the client configuration
+        this.alpacaClient = new AlpacaClient({
+          apiKey,
+          secretKey,
+          isPaper,
+          baseUrl: isPaper ? 'https://paper-api.alpaca.markets' : 'https://api.alpaca.markets'
+        });
         
-        // Get account info to verify connection
+        // Initialize the client
+        await this.alpacaClient.initClient();
+        console.log('✅ Alpaca client initialized successfully');
+        
+        // Test the connection by getting account info
         const account = await this.alpacaClient.getAccount();
+        console.log(`✅ Successfully connected to Alpaca API. Account: ${account.id} (${account.status})`);
         
         res.json({
           success: true,
           message: 'Successfully connected to Alpaca API',
           data: {
-            account,
-            connected: true
+            account: {
+              id: account.id,
+              status: account.status,
+              account_number: account.account_number,
+              buying_power: account.buying_power,
+              cash: account.cash,
+              portfolio_value: account.portfolio_value
+            },
+            connected: true,
+            isPaper: isPaper
           }
         });
-      } catch (error) {
-        console.error('Error connecting to Alpaca API:', error);
-        res.status(500).json({
+      } catch (initError) {
+        console.error('❌ Failed to initialize Alpaca client:', initError);
+        
+        // Provide specific error messages based on the error type
+        let errorMessage = 'Failed to connect to Alpaca API';
+        let statusCode = 500;
+        
+        if (initError instanceof Error) {
+          const errorStr = initError.message.toLowerCase();
+          
+          if (errorStr.includes('401') || errorStr.includes('unauthorized') || errorStr.includes('credentials')) {
+            errorMessage = 'Invalid API credentials. Please check your API key and secret.';
+            statusCode = 401;
+          } else if (errorStr.includes('403') || errorStr.includes('forbidden')) {
+            errorMessage = 'API access forbidden. Please check your account permissions.';
+            statusCode = 403;
+          } else if (errorStr.includes('network') || errorStr.includes('enotfound') || errorStr.includes('timeout')) {
+            errorMessage = 'Network error. Please check your internet connection and try again.';
+            statusCode = 503;
+          } else if (errorStr.includes('not found')) {
+            errorMessage = 'API endpoint not found. Please verify your API configuration.';
+            statusCode = 404;
+          } else {
+            errorMessage = `Connection failed: ${initError.message}`;
+          }
+        }
+        
+        res.status(statusCode).json({
           success: false,
-          message: error instanceof Error ? error.message : 'Failed to connect to Alpaca API'
+          message: errorMessage,
+          error: {
+            code: statusCode,
+            type: initError instanceof Error ? initError.name : 'UnknownError'
+          }
         });
       }
     } catch (error) {
-      console.error('Error in connect endpoint:', error);
-      res.status(500).json(createServerError(error instanceof Error ? error.message : 'Unknown error', error));
+      console.error('❌ Error in connect endpoint:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Internal server error during connection attempt',
+        error: createServerError(error instanceof Error ? error.message : 'Unknown error', error)
+      });
     }
   }
 
   /**
-   * Get account information
+   * Safely ensure client is initialized before making API calls
+   */
+  private safeEnsureClient(): boolean {
+    try {
+      this.alpacaClient.ensureClient();
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * Get account information with proper error handling
    */
   private async getAccount(req: Request, res: Response): Promise<void> {
     try {
-      this.alpacaClient.ensureClient();
+      if (!this.safeEnsureClient()) {
+        res.status(400).json({
+          success: false,
+          message: 'Alpaca client not connected. Please connect first.'
+        });
+        return;
+      }
+      
       const account = await this.alpacaClient.getAccount();
       
       res.json({
@@ -98,7 +184,7 @@ export class AlpacaRestController {
         data: account
       });
     } catch (error) {
-      console.error('Error getting account:', error);
+      console.error('❌ Error getting account:', error);
       res.status(500).json({
         success: false,
         message: error instanceof Error ? error.message : 'Failed to get account information'
@@ -107,11 +193,18 @@ export class AlpacaRestController {
   }
 
   /**
-   * Get positions
+   * Get positions with proper error handling
    */
   private async getPositions(req: Request, res: Response): Promise<void> {
     try {
-      this.alpacaClient.ensureClient();
+      if (!this.safeEnsureClient()) {
+        res.status(400).json({
+          success: false,
+          message: 'Alpaca client not connected. Please connect first.'
+        });
+        return;
+      }
+      
       const positions = await this.alpacaClient.getPositions();
       
       res.json({
@@ -119,7 +212,7 @@ export class AlpacaRestController {
         data: positions
       });
     } catch (error) {
-      console.error('Error getting positions:', error);
+      console.error('❌ Error getting positions:', error);
       res.status(500).json({
         success: false,
         message: error instanceof Error ? error.message : 'Failed to get positions'
@@ -128,11 +221,18 @@ export class AlpacaRestController {
   }
 
   /**
-   * Get market status
+   * Get market status with proper error handling
    */
   private async getMarketStatus(req: Request, res: Response): Promise<void> {
     try {
-      this.alpacaClient.ensureClient();
+      if (!this.safeEnsureClient()) {
+        res.status(400).json({
+          success: false,
+          message: 'Alpaca client not connected. Please connect first.'
+        });
+        return;
+      }
+      
       const clock = await this.alpacaClient.getClock();
       
       res.json({
@@ -140,7 +240,7 @@ export class AlpacaRestController {
         data: clock
       });
     } catch (error) {
-      console.error('Error getting market status:', error);
+      console.error('❌ Error getting market status:', error);
       res.status(500).json({
         success: false,
         message: error instanceof Error ? error.message : 'Failed to get market status'
@@ -149,11 +249,18 @@ export class AlpacaRestController {
   }
 
   /**
-   * Get orders
+   * Get orders with proper error handling
    */
   private async getOrders(req: Request, res: Response): Promise<void> {
     try {
-      this.alpacaClient.ensureClient();
+      if (!this.safeEnsureClient()) {
+        res.status(400).json({
+          success: false,
+          message: 'Alpaca client not connected. Please connect first.'
+        });
+        return;
+      }
+      
       const orders = await this.alpacaClient.getOrders();
       
       res.json({
@@ -161,17 +268,24 @@ export class AlpacaRestController {
         data: orders
       });
     } catch (error) {
-      console.error('Error getting orders:', error);
+      console.error('❌ Error getting orders:', error);
       res.status(500).json(createServerError(error instanceof Error ? error.message : 'Unknown error', error));
     }
   }
 
   /**
-   * Get assets
+   * Get assets with proper error handling
    */
   private async getAssets(req: Request, res: Response): Promise<void> {
     try {
-      this.alpacaClient.ensureClient();
+      if (!this.safeEnsureClient()) {
+        res.status(400).json({
+          success: false,
+          message: 'Alpaca client not connected. Please connect first.'
+        });
+        return;
+      }
+      
       const assets = await this.alpacaClient.getAssets();
       
       res.json({
@@ -179,7 +293,7 @@ export class AlpacaRestController {
         data: assets
       });
     } catch (error) {
-      console.error('Error getting assets:', error);
+      console.error('❌ Error getting assets:', error);
       res.status(500).json({
         success: false,
         message: error instanceof Error ? error.message : 'Failed to get assets'
@@ -188,11 +302,18 @@ export class AlpacaRestController {
   }
 
   /**
-   * Get market data for a symbol
+   * Get market data for a symbol with improved error handling
    */
   private async getMarketData(req: Request, res: Response): Promise<void> {
     try {
-      this.alpacaClient.ensureClient();
+      if (!this.safeEnsureClient()) {
+        res.status(400).json({
+          success: false,
+          message: 'Alpaca client not connected. Please connect first.'
+        });
+        return;
+      }
+      
       const { symbol } = req.params;
       
       if (!symbol) {
@@ -203,6 +324,8 @@ export class AlpacaRestController {
         return;
       }
       
+      console.log(`📊 Fetching market data for symbol: ${symbol}`);
+      
       // Check if symbol is crypto (contains '/')
       const isCrypto = symbol.includes('/');
       
@@ -210,17 +333,20 @@ export class AlpacaRestController {
         let marketData;
         
         if (isCrypto) {
+          console.log(`🪙 Processing crypto symbol: ${symbol}`);
           // For crypto symbols
           const snapshots = await this.alpacaClient.getCryptoSnapshots([symbol]);
           marketData = {
             symbol,
             snapshots: snapshots.snapshots || {},
-            isCrypto: true
+            isCrypto: true,
+            timestamp: new Date().toISOString()
           };
         } else {
+          console.log(`📈 Processing stock symbol: ${symbol}`);
           // For stock symbols
           try {
-            // Use Promise.allSettled to handle partial failures
+            // Use Promise.allSettled to handle partial failures gracefully
             const [barResult, quoteResult] = await Promise.allSettled([
               this.alpacaClient.getStocksBarsLatest([symbol]),
               this.alpacaClient.getStocksQuotesLatest([symbol])
@@ -230,11 +356,20 @@ export class AlpacaRestController {
             const barData = barResult.status === 'fulfilled' ? barResult.value : { bars: {} };
             const quoteData = quoteResult.status === 'fulfilled' ? quoteResult.value : { quotes: {} };
             
+            // Log any failures for debugging
+            if (barResult.status === 'rejected') {
+              console.log(`⚠️  Failed to get bars for ${symbol}:`, barResult.reason?.message || 'Unknown error');
+            }
+            if (quoteResult.status === 'rejected') {
+              console.log(`⚠️  Failed to get quotes for ${symbol}:`, quoteResult.reason?.message || 'Unknown error');
+            }
+            
             marketData = {
               symbol,
               bars: barData.bars || {},
               quotes: quoteData.quotes || {},
               isCrypto: false,
+              timestamp: new Date().toISOString(),
               // Add status information to help with debugging
               dataStatus: {
                 barsAvailable: barResult.status === 'fulfilled',
@@ -242,13 +377,14 @@ export class AlpacaRestController {
               }
             };
           } catch (fetchError) {
-            console.warn(`Fallback error handling for ${symbol}:`, fetchError);
+            console.warn(`⚠️  Fallback error handling for ${symbol}:`, fetchError);
             // Provide empty data structure if everything fails
             marketData = {
               symbol,
               bars: {},
               quotes: {},
               isCrypto: false,
+              timestamp: new Date().toISOString(),
               dataStatus: {
                 barsAvailable: false,
                 quotesAvailable: false,
@@ -258,19 +394,20 @@ export class AlpacaRestController {
           }
         }
         
+        console.log(`✅ Successfully fetched market data for ${symbol}`);
         res.json({
           success: true,
           data: marketData
         });
       } catch (innerError) {
-        console.error(`Error processing market data for ${symbol}:`, innerError);
+        console.error(`❌ Error processing market data for ${symbol}:`, innerError);
         res.status(500).json({
           success: false,
           message: `Error processing market data: ${innerError instanceof Error ? innerError.message : 'Unknown error'}`
         });
       }
     } catch (error) {
-      console.error(`Error getting market data for ${req.params.symbol}:`, error);
+      console.error(`❌ Error getting market data for ${req.params.symbol}:`, error);
       res.status(500).json({
         success: false,
         message: error instanceof Error ? error.message : 'Failed to get market data'
@@ -285,7 +422,14 @@ export class AlpacaRestController {
    */
   private async getCryptoPriceHistory(req: Request, res: Response): Promise<void> {
     try {
-      this.alpacaClient.ensureClient();
+      if (!this.safeEnsureClient()) {
+        res.status(400).json({
+          success: false,
+          message: 'Alpaca client not connected. Please connect first.'
+        });
+        return;
+      }
+      
       const { base, quote } = req.params;
       const symbol = `${base}/${quote}`;
       const { timeframe = '1Day', start, end, limit = 100 } = req.query;
@@ -297,6 +441,8 @@ export class AlpacaRestController {
         });
         return;
       }
+      
+      console.log(`📊 Fetching crypto price history for ${symbol}`);
       
       try {
         const cryptoData = await this.alpacaClient.getCryptoBars(
@@ -326,14 +472,14 @@ export class AlpacaRestController {
           }
         });
       } catch (innerError) {
-        console.error(`Error processing crypto price history for ${symbol}:`, innerError);
+        console.error(`❌ Error processing crypto price history for ${symbol}:`, innerError);
         res.status(500).json({
           success: false,
           message: `Error processing crypto price history: ${innerError instanceof Error ? innerError.message : 'Unknown error'}`
         });
       }
     } catch (error) {
-      console.error(`Error getting crypto price history for ${req.params.base}/${req.params.quote}:`, error);
+      console.error(`❌ Error getting crypto price history for ${req.params.base}/${req.params.quote}:`, error);
       res.status(500).json({
         success: false,
         message: error instanceof Error ? error.message : 'Failed to get crypto price history'
@@ -342,13 +488,20 @@ export class AlpacaRestController {
   }
 
   /**
-   * Get price history for a symbol
+   * Get price history for a symbol with proper error handling
    * @param req Request object
    * @param res Response object
    */
   private async getPriceHistory(req: Request, res: Response): Promise<void> {
     try {
-      this.alpacaClient.ensureClient();
+      if (!this.safeEnsureClient()) {
+        res.status(400).json({
+          success: false,
+          message: 'Alpaca client not connected. Please connect first.'
+        });
+        return;
+      }
+      
       const { symbol } = req.params;
       const { timeframe = '1Day', start, end, limit = 100 } = req.query;
       
@@ -367,6 +520,8 @@ export class AlpacaRestController {
         });
         return;
       }
+      
+      console.log(`📊 Fetching price history for ${symbol}`);
       
       // Check if symbol is crypto (contains '/')
       const isCrypto = symbol.includes('/');
@@ -422,14 +577,14 @@ export class AlpacaRestController {
           }
         });
       } catch (innerError) {
-        console.error(`Error processing price history for ${symbol}:`, innerError);
+        console.error(`❌ Error processing price history for ${symbol}:`, innerError);
         res.status(500).json({
           success: false,
           message: `Error processing price history: ${innerError instanceof Error ? innerError.message : 'Unknown error'}`
         });
       }
     } catch (error) {
-      console.error(`Error getting price history for ${req.params.symbol}:`, error);
+      console.error(`❌ Error getting price history for ${req.params.symbol}:`, error);
       res.status(500).json({
         success: false,
         message: error instanceof Error ? error.message : 'Failed to get price history'

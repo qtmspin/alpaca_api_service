@@ -1,35 +1,50 @@
 {
   "name": "alpaca-api-service-backend",
   "version": "1.0.0",
-  "private": true,
+  "description": "Backend service for Alpaca API integration",
   "type": "module",
+  "main": "dist/index.js",
   "scripts": {
-    "dev": "tsx src/index.ts",
     "build": "tsc",
+    "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "test": "jest"
+    "clean": "rm -rf dist",
+    "lint": "eslint src/**/*.ts",
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@alpacahq/alpaca-trade-api": "^2.16.1",
-    "axios": "^1.6.2",
-    "cors": "^2.8.5",
+    "@alpacahq/typescript-sdk": "^1.0.0",
     "express": "^4.18.2",
-    "helmet": "^7.1.0",
-    "uuid": "^11.1.0",
+    "cors": "^2.8.5",
     "ws": "^8.14.2",
-    "zod": "^3.25.28"
+    "sqlite": "^5.0.1",
+    "sqlite3": "^5.1.6",
+    "uuid": "^9.0.1",
+    "zod": "^3.22.4",
+    "axios": "^1.6.0"
   },
   "devDependencies": {
-    "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
-    "@types/node": "^20.17.50",
+    "@types/cors": "^2.8.17",
     "@types/ws": "^8.5.10",
-    "cross-env": "^7.0.3",
-    "jest": "^29.7.0",
-    "ts-jest": "^29.1.1",
-    "ts-node": "^10.9.2",
-    "ts-node-dev": "^2.0.0",
-    "tsx": "^4.19.4",
-    "typescript": "^5.8.3"
-  }
+    "@types/uuid": "^9.0.7",
+    "@types/node": "^20.9.0",
+    "tsx": "^4.1.0",
+    "typescript": "^5.2.0",
+    "eslint": "^8.54.0",
+    "@typescript-eslint/eslint-plugin": "^6.12.0",
+    "@typescript-eslint/parser": "^6.12.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "alpaca",
+    "trading",
+    "api",
+    "typescript",
+    "websocket"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
 }

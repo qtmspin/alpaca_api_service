@@ -6,6 +6,7 @@ This is the backend service for the Alpaca API integration, providing a clean in
 
 - REST API for trading operations
 - WebSocket streaming for real-time market data, orders, and positions with sub-100ms latency
+- Real-time monitoring of artificial orders using WebSockets instead of polling intervals
 - Separation of concerns with dedicated controllers for REST and WebSocket operations
 - Support for paper trading
 - Configurable rate limiting
@@ -92,7 +93,7 @@ backend/
 ├── src/                    # Source files
 │   ├── api/                # API routes and controllers
 │   │   ├── alpaca-rest-controller.ts    # REST API endpoints for Alpaca
-│   │   ├── alpaca-websocket-controller.ts # WebSocket functionality for Alpaca
+│   │   ├── alpaca-websocket-controller-new.ts # Enhanced WebSocket functionality with sub-100ms latency
 │   │   └── ...             # Other controllers
 │   ├── core/               # Core business logic
 │   │   ├── market-data-subscription.ts  # Market data WebSocket subscription manager
