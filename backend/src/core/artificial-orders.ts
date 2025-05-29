@@ -1,18 +1,26 @@
 /**
  * artificial-orders.ts
  * 
- * This file manages artificial orders that are triggered by market conditions.
+ * This file manages artificial / simulated  orders that are triggered by market conditions.
  * Location: backend/src/core/artificial-orders.ts
  * 
  * Responsibilities:
  * - Manage artificial orders that aren't sent to the broker immediately
  * - Monitor market conditions and trigger orders when conditions are met
  * - Provide a system for conditional order execution
+ * 
+ * How It Works
+When the service starts, it establishes a WebSocket connection to Alpaca's market data stream
+As artificial orders are created, the system automatically subscribes to real-time data for those symbols
+When price updates arrive via WebSocket, they're immediately processed against pending orders
+If a price condition is met, the order is executed with minimal latency
+ * 
  */
 
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
 import { ArtificialOrderData, OrderSide, OrderType, TimeInForce } from './schemas.js';
+import { MarketDataSubscriptionManager, MarketData } from './market-data-subscription.js';
 
 export interface ArtificialOrder extends ArtificialOrderData {
   id: string;
@@ -242,35 +250,111 @@ export class ArtificialOrderManager extends EventEmitter {
     return triggeredOrders;
   }
 
+  // Market data subscription manager
+  private marketDataManager: MarketDataSubscriptionManager | null = null;
+
   /**
-   * Start monitoring for order triggers
+   * Start monitoring for order triggers using WebSocket feed
    */
-  startMonitoring(): void {
+  startMonitoring(wsClient?: any): void {
     if (this.monitoringInterval) {
       return; // Already monitoring
     }
-
+    
+    // Initialize market data subscription manager if not already initialized
+    if (!this.marketDataManager) {
+      this.marketDataManager = new MarketDataSubscriptionManager();
+      
+      // Set up event listener for market data updates
+      this.marketDataManager.on('marketData', (marketData: MarketData) => {
+        // Process any pending orders for this symbol when market data is received
+        this.processMarketData(marketData.symbol, { 
+          price: marketData.price, 
+          volume: marketData.volume 
+        });
+      });
+    }
+    
+    // Initialize the market data manager with the WebSocket client if provided
+    if (wsClient) {
+      this.marketDataManager.initialize(wsClient);
+    }
+    
+    // Check if the market data manager is connected
+    if (!this.marketDataManager.isConnected()) {
+      console.warn('WebSocket client not available. Real-time monitoring will be limited.');
+      // Continue without WebSocket - we'll rely on the interval-based safety net
+    }
+    
+    // Set up a lightweight interval to ensure all symbols are subscribed
+    // This is just a safety net, not the primary monitoring mechanism
     this.monitoringInterval = setInterval(() => {
-      // This would typically fetch market data and check triggers
-      // For now, we'll just emit a monitoring event
+      this.updateSubscriptions();
+      
+      // Emit monitoring event with current state
       this.emit('monitoring', {
         timestamp: new Date().toISOString(),
-        pendingOrders: this.getOrdersByStatus('pending').length
+        pendingOrders: this.getOrdersByStatus('pending').length,
+        activeSubscriptions: this.marketDataManager ? this.marketDataManager.getActiveSubscriptions() : []
       });
-    }, this.priceCheckIntervalMs);
-
+    }, 30000); // Check subscriptions every 30 seconds
+    
+    // Initial subscription update
+    this.updateSubscriptions();
+    
     this.emit('monitoringStarted');
+  }
+  
+  /**
+   * Update WebSocket subscriptions based on pending orders
+   */
+  private updateSubscriptions(): void {
+    if (!this.marketDataManager || !this.marketDataManager.isConnected()) return;
+    
+    // Get all symbols with pending orders
+    const pendingOrders = this.getOrdersByStatus('pending');
+    const symbols = [...new Set(pendingOrders.map(order => order.symbol))];
+    
+    // Get current subscriptions
+    const currentSubscriptions = this.marketDataManager.getActiveSubscriptions();
+    
+    // Subscribe to new symbols
+    for (const symbol of symbols) {
+      if (!currentSubscriptions.includes(symbol)) {
+        this.marketDataManager.subscribe(symbol);
+      }
+    }
+    
+    // Unsubscribe from symbols with no pending orders
+    for (const symbol of currentSubscriptions) {
+      if (!symbols.includes(symbol)) {
+        this.marketDataManager.unsubscribe(symbol);
+      }
+    }
   }
 
   /**
    * Stop monitoring for order triggers
    */
   stopMonitoring(): void {
+    // Clear the interval timer
     if (this.monitoringInterval) {
       clearInterval(this.monitoringInterval);
       this.monitoringInterval = null;
-      this.emit('monitoringStopped');
     }
+    
+    // Unsubscribe from all active symbols using the market data manager
+    if (this.marketDataManager && this.marketDataManager.isConnected()) {
+      try {
+        // Unsubscribe from all symbols
+        this.marketDataManager.unsubscribeAll();
+        console.log('Unsubscribed from all market data feeds');
+      } catch (error) {
+        console.error('Error unsubscribing from market data feeds:', error);
+      }
+    }
+    
+    this.emit('monitoringStopped');
   }
 
   /**

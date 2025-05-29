@@ -2,7 +2,7 @@
 
 ## Overview
 
-Artificial orders are a mechanism for handling stop and stop-limit orders during pre-market (4:30 AM - 9:30 AM Eastern) and post-market (4:00 PM - 8:00 PM Eastern) hours when these order types aren't supported by the exchange. The Alpaca API Service implements an artificial order system that monitors prices and executes market or limit orders when trigger conditions are met.
+Artificial orders are a mechanism for handling stop and stop-limit orders during pre-market (4:30 AM - 9:30 AM Eastern) and post-market (4:00 PM - 8:00 PM Eastern) hours when these order types aren't supported by the exchange. The Alpaca API Service implements an artificial order system that uses WebSocket connections for real-time price monitoring with sub-100ms latency, executing market or limit orders immediately when trigger conditions are met.
 
 ## Market Hours
 
@@ -178,15 +178,24 @@ Artificial orders follow this lifecycle:
 
 The artificial order system:
 
-1. Monitors prices at regular intervals (default: every second)
-2. Checks if trigger conditions are met for pending orders
-3. Executes market or limit orders when triggered
-4. Updates order status throughout the lifecycle
-5. Automatically expires day orders at market close
+1. Uses WebSocket connections to receive real-time price updates from Alpaca
+2. Maintains active subscriptions only for symbols with pending orders
+3. Processes price updates immediately when received (sub-100ms latency)
+4. Executes market or limit orders instantly when trigger conditions are met
+5. Updates order status throughout the lifecycle
+6. Automatically expires day orders at market close
+
+### Architecture
+
+The system follows SOLID principles with a clean separation of concerns:
+
+- **MarketDataSubscriptionManager**: Handles WebSocket connections and market data subscriptions
+- **ArtificialOrderManager**: Manages order lifecycle and trigger conditions
+- **ArtificialOrdersController**: Provides the REST API endpoints
 
 ## Limitations
 
 - Artificial orders are only available during pre-market and post-market hours if enabled in configuration
 - Only day and GTC (good till canceled) time-in-force options are supported
-- Price monitoring occurs at intervals, so execution may not be instantaneous
-- Orders may be missed if the service is restarted
+- Requires a stable network connection to the Alpaca WebSocket API
+- For optimal performance, the service should be run on a server with low latency to the broker

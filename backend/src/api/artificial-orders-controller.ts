@@ -64,11 +64,70 @@ export class ArtificialOrdersController {
   }
   
   /**
-   * Set up order monitoring
+   * Set up order monitoring using WebSockets for real-time price updates
    */
   private setupOrderMonitoring(): void {
-    // Start monitoring for order triggers
+    // Get the WebSocket server instance
+    const wsServer = global.wss;
+    
+    // Always start the order manager, it will handle the case when WebSocket is not available
     this.orderManager.startMonitoring();
+    
+    if (!wsServer) {
+      console.warn('WebSocket server not initialized, artificial orders will use interval-based monitoring');
+      return; // No WebSocket server available, already started with interval-based fallback
+    } else {
+      console.log('Setting up WebSocket-based real-time order monitoring');
+      
+      try {
+        // Import WebSocket library dynamically to avoid issues if it's not available
+        import('ws').then(({ default: WebSocket }) => {
+          // Create a dedicated WebSocket client for market data
+          const marketDataWsClient = new WebSocket('wss://stream.data.alpaca.markets/v2/iex');
+          
+          // Handle WebSocket connection
+          marketDataWsClient.on('open', () => {
+            console.log('Connected to Alpaca market data WebSocket');
+            
+            // Authenticate with Alpaca
+            const authMessage = {
+              action: 'auth',
+              key: this.alpacaClient.getApiKey(),
+              secret: this.alpacaClient.getApiSecret()
+            };
+            
+            marketDataWsClient.send(JSON.stringify(authMessage));
+            
+            // Start monitoring with the WebSocket client
+            this.orderManager.startMonitoring(marketDataWsClient);
+            
+            console.log('Real-time order monitoring started with WebSocket');
+          });
+          
+          // Handle WebSocket errors
+          marketDataWsClient.on('error', (error) => {
+            console.error('Market data WebSocket error:', error);
+            // Fall back to interval-based monitoring
+            this.orderManager.startMonitoring();
+          });
+          
+          // Handle WebSocket closure
+          marketDataWsClient.on('close', () => {
+            console.log('Market data WebSocket connection closed');
+            // Attempt to reconnect after a delay
+            setTimeout(() => this.setupOrderMonitoring(), 5000);
+          });
+        }).catch(error => {
+          console.error('Failed to import WebSocket library:', error);
+          // Fall back to interval-based monitoring
+          this.orderManager.startMonitoring();
+        });
+      } catch (error) {
+        console.error('Error setting up WebSocket monitoring:', error);
+        // Fall back to interval-based monitoring
+        this.orderManager.startMonitoring();
+      }
+    }
     
     // Set up event listener for triggered orders
     this.orderManager.on('orderTriggered', async (order, marketData) => {

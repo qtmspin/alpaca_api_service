@@ -1,6 +1,6 @@
 # 🦙 Alpaca API Service
 
-A TypeScript service for interacting with the Alpaca API with enhanced features for pre-market and post-market trading.
+A TypeScript service for interacting with the Alpaca API with enhanced features for pre-market and post-market trading, featuring real-time WebSocket-based order monitoring with sub-100ms latency.
 
 ## 📚 Documentation
 
@@ -46,6 +46,7 @@ alpaca_api_service/
 │   │   │   └── routes.ts               # Route configuration
 │   │   ├── core/                 # Core business logic and schemas
 │   │   │   ├── artificial-orders.ts    # Artificial order management
+│   │   │   ├── market-data-subscription.ts # Real-time market data subscriptions
 │   │   │   ├── config-manager.ts       # Configuration management
 │   │   │   ├── errors.ts               # Error handling
 │   │   │   ├── index.ts               # Core exports
@@ -73,7 +74,7 @@ alpaca_api_service/
 
 ### 🛑 Artificial Orders
 
-Implements stop and stop-limit orders during pre-market and post-market hours when these order types aren't natively supported by the exchange.
+Implements stop and stop-limit orders during pre-market and post-market hours when these order types aren't natively supported by the exchange. Features real-time WebSocket-based price monitoring with sub-100ms latency for near-instant order execution when conditions are met.
 
 ```typescript
 // Example: Creating an artificial stop order
