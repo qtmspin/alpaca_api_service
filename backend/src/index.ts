@@ -18,19 +18,32 @@
  * Location: backend/src/index.ts
  */
 
+/**
+ * index.ts - Updated to use refactored WebSocket system
+ * 
+ * Main entry point with simplified WebSocket initialization
+ */
+
 import express from 'express'
 import cors from 'cors'
 import { createServer } from 'http'
 import { ConfigManager } from './core/index.js'
 import { setupApiRoutes } from './api/routes.js'
-import { setupWebSocketServer } from './services/websocket-server.js'
-import { ArtificialOrderManager } from './core/artificial-orders.js'
+import { AlpacaWebSocketManager } from './services/websocket/alpaca-websocket-manager.js'  // Updated to use new WebSocket manager
+import { ArtificialOrderManager } from './core/artificial-orders.js'  // Updated import
 import { AlpacaClient } from './services/alpaca-client.js';
+
+// Service references for graceful shutdown
+interface AppServices {
+  wsManager?: AlpacaWebSocketManager;
+  orderManager?: ArtificialOrderManager;
+}
 
 const app = express()
 let server: any = null
+const services: AppServices = {}
 
-// Enable CORS for all routes - this fixes WebSocket connection issues
+// Enable CORS for all routes
 app.use(cors({
   origin: ['http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:3000', 'http://127.0.0.1:5173'],
   credentials: true
@@ -63,7 +76,7 @@ async function initializeServices() {
       console.log('✅ Default configuration created')
     }
     
-    // Initialize Alpaca client (but don't connect until credentials are provided)
+    // Initialize Alpaca client
     console.log('🦙 Initializing Alpaca client...')
     let alpacaClient: AlpacaClient | null = null
     
@@ -74,7 +87,7 @@ async function initializeServices() {
         await alpacaClient.initClient()
         console.log('✅ Alpaca client connected successfully')
       } catch (error) {
-        console.log('⚠️  Alpaca client connection failed (will need to connect via UI):', error instanceof Error ? error.message : 'Unknown error')
+        console.log('⚠️  Alpaca client connection failed:', error instanceof Error ? error.message : 'Unknown error')
         // Create a client but don't initialize it yet
         alpacaClient = new AlpacaClient({
           apiKey: '',
@@ -83,8 +96,7 @@ async function initializeServices() {
         })
       }
     } else {
-      console.log('⚠️  No Alpaca credentials found (will need to connect via UI)')
-      // Create a client but don't initialize it yet
+      console.log('⚠️  No Alpaca credentials found')
       alpacaClient = new AlpacaClient({
         apiKey: '',
         secretKey: '',
@@ -92,7 +104,7 @@ async function initializeServices() {
       })
     }
     
-    // Initialize artificial order manager
+    // Initialize artificial order manager (refactored version)
     console.log('🎯 Initializing artificial order manager...')
     const orderManager = new ArtificialOrderManager()
     console.log('✅ Artificial order manager initialized')
@@ -105,30 +117,43 @@ async function initializeServices() {
     // Create HTTP server
     server = createServer(app)
     
-    // Set up WebSocket server
-    console.log('🔌 Setting up WebSocket server...')
-    const wsServer = setupWebSocketServer(server, alpacaClient, orderManager)
-    console.log('✅ WebSocket server configured')
+    // Set up WebSocket manager
+    console.log('🔌 Setting up WebSocket manager...')
+    // Store reference for graceful shutdown
+    services.wsManager = new AlpacaWebSocketManager()
     
-    // Start the artificial order manager with the WebSocket client
-    console.log('🔄 Starting artificial order monitoring...')
-    // Get the market data manager from the WebSocket controller
-    if (global.wss && wsServer) {
-      // Get the market data subscription manager from the Alpaca WebSocket controller
-      const alpacaController = (wsServer as any).alpacaWebSocketController;
-      if (alpacaController && alpacaController.marketDataManager) {
-        // Start monitoring with the market data manager
-        orderManager.startMonitoring(null, alpacaController.marketDataManager);
-        console.log('✅ Artificial order monitoring started with WebSocket')
-      } else {
-        console.warn('⚠️ WebSocket controller not properly initialized, falling back to interval-based monitoring')
-        orderManager.startMonitoring();
+    // Initialize WebSocket connections if we have valid credentials
+    if (alpacaClient.isClientInitialized()) {
+      const alpacaConfig = alpacaClient.getConfig()
+      try {
+        await services.wsManager.initialize(alpacaConfig.apiKey, alpacaConfig.secretKey, alpacaConfig.isPaper)
+        console.log('✅ WebSocket connections to Alpaca established')
+        
+        // Register the WebSocket manager with the order manager for price monitoring
+        orderManager.registerPriceMonitor((symbols: string[], callback: Function) => {
+          return services.wsManager!.monitorPriceForOrders(symbols, callback as any)
+        })
+        
+        // Register the unsubscribe function
+        orderManager.registerUnsubscribeFunction((monitorId: string) => {
+          services.wsManager!.stopMonitoringSymbol(monitorId)
+        })
+        
+        // Store reference to order manager for graceful shutdown
+        services.orderManager = orderManager
+      } catch (error) {
+        console.error('⚠️  Failed to initialize WebSocket connections:', error)
       }
     } else {
-      console.warn('⚠️ WebSocket server not initialized, artificial orders will use interval-based monitoring')
-      // Start monitoring without WebSocket
-      orderManager.startMonitoring();
+      console.log('⚠️  WebSocket connections will be initialized when credentials are provided')
     }
+    
+    console.log('✅ WebSocket server configured')
+    
+    // Start the artificial order manager
+    console.log('🔄 Starting artificial order monitoring...')
+    orderManager.startMonitoring()
+    console.log('✅ Artificial order monitoring started')
     
     // Start server
     const port = config.startup.apiPort || 9000
@@ -161,6 +186,24 @@ async function initializeServices() {
 // Graceful shutdown
 process.on('SIGINT', async () => {
   console.log('\n🛑 Shutting down gracefully...')
+  
+  // Shutdown WebSocket manager if it exists
+  if (services.wsManager) {
+    try {
+      console.log('🔌 Shutting down WebSocket connections...')
+      await services.wsManager.shutdown()
+      console.log('✅ WebSocket connections closed')
+    } catch (error) {
+      console.error('⚠️ Failed to shutdown WebSocket connections:', error)
+    }
+  }
+  
+  // Stop artificial order monitoring
+  if (services.orderManager) {
+    console.log('🔌 Stopping artificial order monitoring...')
+    services.orderManager.stopMonitoring()
+    console.log('✅ Artificial order monitoring stopped')
+  }
   
   if (server) {
     server.close(() => {

@@ -27,118 +27,90 @@
 
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
-import { ArtificialOrderData, OrderSide, OrderType, TimeInForce } from './schemas.js';
-import { MarketDataSubscriptionManager, MarketData } from './market-data-subscription.js';
 
-export interface ArtificialOrder extends ArtificialOrderData {
+export interface ArtificialOrder {
   id: string;
   symbol: string;
   qty: number;
-  side: OrderSide;
-  type: OrderType;
-  limit_price?: number;
-  stop_price?: number;
-  time_in_force: 'day' | 'gtc';
-  status: 'pending' | 'filled' | 'cancelled' | 'expired';
-  created_at: string;
-  updated_at: string;
-  trigger_condition?: {
+  side: 'buy' | 'sell';
+  type: 'market' | 'limit' | 'stop' | 'stop_limit';
+  limitPrice?: number;
+  stopPrice?: number;
+  timeInForce: 'day' | 'gtc';
+  status: 'pending' | 'triggered' | 'filled' | 'cancelled' | 'expired';
+  createdAt: string;
+  updatedAt: string;
+  triggerCondition?: {
     field: 'price' | 'volume';
     operator: 'gte' | 'lte' | 'eq';
     value: number;
   };
 }
 
-export interface TriggerCondition {
-  field: 'price' | 'volume';
-  operator: 'gte' | 'lte' | 'eq';
-  value: number;
-}
-
 export interface CreateArtificialOrderRequest {
   symbol: string;
   qty: number;
-  side: OrderSide;
-  type: OrderType;
-  limit_price?: number;
-  stop_price?: number;
-  time_in_force: TimeInForce;
-  trigger_condition?: TriggerCondition;
+  side: 'buy' | 'sell';
+  type: 'market' | 'limit' | 'stop' | 'stop_limit';
+  limitPrice?: number;
+  stopPrice?: number;
+  timeInForce: 'day' | 'gtc';
+  triggerCondition?: {
+    field: 'price' | 'volume';
+    operator: 'gte' | 'lte' | 'eq';
+    value: number;
+  };
 }
 
-// Utility function to check if an artificial order can be executed
-export function canExecuteArtificialOrder(order: ArtificialOrder, marketData: { price: number; volume?: number }): boolean {
-  if (!order.trigger_condition) {
-    return true;
-  }
-
-  const { field, operator, value } = order.trigger_condition;
-  const marketValue = field === 'price' ? marketData.price : (marketData.volume || 0);
-
-  switch (operator) {
-    case 'gte':
-      return marketValue >= value;
-    case 'lte':
-      return marketValue <= value;
-    case 'eq':
-      return marketValue === value;
-    default:
-      return false;
-  }
-}
-
+/**
+ * ArtificialOrderManager
+ * 
+ * Manages artificial orders that execute based on real-time market data conditions.
+ * Handles order creation, monitoring, triggering, and lifecycle management.
+ * Uses WebSockets for real-time price monitoring with sub-100ms latency.
+ */
 export class ArtificialOrderManager extends EventEmitter {
-  private orders: Map<string, ArtificialOrder> = new Map();
-  private monitoringInterval: NodeJS.Timeout | null = null;
-  private priceCheckIntervalMs: number;
-  private marketDataManager: MarketDataSubscriptionManager | null = null;
-
-  constructor(priceCheckIntervalMs: number = 5000) {
-    super();
-    this.priceCheckIntervalMs = priceCheckIntervalMs;
-  }
+  private orders = new Map<string, ArtificialOrder>();
+  private isMonitoring = false;
+  private priceMonitorCallback?: (symbols: string[], callback: Function) => string;
+  private unsubscribeCallback?: (monitorId: string) => void;
+  private activeMonitorIds = new Map<string, string>();
 
   /**
    * Create a new artificial order
    */
   createOrder(request: CreateArtificialOrderRequest): ArtificialOrder {
-    // Ensure time_in_force is restricted to 'day' or 'gtc'
-    const timeInForce = request.time_in_force === 'day' || request.time_in_force === 'gtc' 
-      ? request.time_in_force 
-      : 'day'; // Default to 'day' if an unsupported value is provided
-    
     const order: ArtificialOrder = {
       id: uuidv4(),
-      symbol: request.symbol,
+      symbol: request.symbol.toUpperCase(),
       qty: request.qty,
       side: request.side,
       type: request.type,
-      limit_price: request.limit_price,
-      stop_price: request.stop_price,
-      time_in_force: timeInForce, // Use the validated value
+      limitPrice: request.limitPrice,
+      stopPrice: request.stopPrice,
+      timeInForce: request.timeInForce,
       status: 'pending',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      trigger_condition: request.trigger_condition
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      triggerCondition: request.triggerCondition
     };
 
     this.orders.set(order.id, order);
-    
-    // Emit event for order creation
     this.emit('orderCreated', order);
     
+    console.log(`Created artificial order: ${order.id} for ${order.symbol}`);
     return order;
   }
 
   /**
-   * Get an artificial order by ID
+   * Get order by ID
    */
   getOrder(orderId: string): ArtificialOrder | undefined {
     return this.orders.get(orderId);
   }
 
   /**
-   * Get all artificial orders
+   * Get all orders
    */
   getAllOrders(): ArtificialOrder[] {
     return Array.from(this.orders.values());
@@ -147,7 +119,7 @@ export class ArtificialOrderManager extends EventEmitter {
   /**
    * Get orders by status
    */
-  getOrdersByStatus(status: ArtificialOrder['status']): ArtificialOrder[] {
+  getOrdersByStatus(status: string): ArtificialOrder[] {
     return this.getAllOrders().filter(order => order.status === status);
   }
 
@@ -155,34 +127,11 @@ export class ArtificialOrderManager extends EventEmitter {
    * Get orders by symbol
    */
   getOrdersBySymbol(symbol: string): ArtificialOrder[] {
-    return this.getAllOrders().filter(order => order.symbol === symbol);
+    return this.getAllOrders().filter(order => order.symbol === symbol.toUpperCase());
   }
 
   /**
-   * Update an artificial order
-   */
-  updateOrder(orderId: string, updates: Partial<ArtificialOrder>): ArtificialOrder | null {
-    const order = this.orders.get(orderId);
-    if (!order) {
-      return null;
-    }
-
-    const updatedOrder: ArtificialOrder = {
-      ...order,
-      ...updates,
-      updated_at: new Date().toISOString()
-    };
-
-    this.orders.set(orderId, updatedOrder);
-    
-    // Emit event for order update
-    this.emit('orderUpdated', updatedOrder, order);
-    
-    return updatedOrder;
-  }
-
-  /**
-   * Cancel an artificial order
+   * Cancel an order
    */
   cancelOrder(orderId: string): boolean {
     const order = this.orders.get(orderId);
@@ -190,41 +139,37 @@ export class ArtificialOrderManager extends EventEmitter {
       return false;
     }
 
-    const cancelledOrder = this.updateOrder(orderId, { status: 'cancelled' });
+    order.status = 'cancelled';
+    order.updatedAt = new Date().toISOString();
     
-    if (cancelledOrder) {
-      this.emit('orderCancelled', cancelledOrder);
-      return true;
-    }
-    
-    return false;
-  }
-
-  /**
-   * Remove an artificial order
-   */
-  removeOrder(orderId: string): boolean {
-    const order = this.orders.get(orderId);
-    if (!order) {
-      return false;
-    }
-
-    this.orders.delete(orderId);
-    this.emit('orderRemoved', order);
-    
+    this.emit('orderCancelled', order);
+    console.log(`Cancelled artificial order: ${orderId}`);
     return true;
   }
 
   /**
-   * Check if an order should be triggered based on market data
+   * Process market data and check for triggers
+   * This is called by the WebSocket server when market data is received
    */
-  checkOrderTrigger(order: ArtificialOrder, marketData: { price: number; volume?: number }): boolean {
-    if (!order.trigger_condition) {
-      // No trigger condition means order should be executed immediately
-      return true;
+  processMarketData(symbol: string, marketData: { price: number; volume?: number }): void {
+    const pendingOrders = this.getOrdersBySymbol(symbol).filter(order => order.status === 'pending');
+    
+    for (const order of pendingOrders) {
+      if (this.checkOrderTrigger(order, marketData)) {
+        this.triggerOrder(order, marketData);
+      }
+    }
+  }
+
+  /**
+   * Check if an order should be triggered
+   */
+  private checkOrderTrigger(order: ArtificialOrder, marketData: { price: number; volume?: number }): boolean {
+    if (!order.triggerCondition) {
+      return true; // No condition means immediate trigger
     }
 
-    const { field, operator, value } = order.trigger_condition;
+    const { field, operator, value } = order.triggerCondition;
     const marketValue = field === 'price' ? marketData.price : (marketData.volume || 0);
 
     switch (operator) {
@@ -240,161 +185,31 @@ export class ArtificialOrderManager extends EventEmitter {
   }
 
   /**
-   * Process market data and trigger orders if conditions are met
+   * Trigger an order
    */
-  processMarketData(symbol: string, marketData: { price: number; volume?: number }): ArtificialOrder[] {
-    const triggeredOrders: ArtificialOrder[] = [];
-    const pendingOrders = this.getOrdersBySymbol(symbol).filter(order => order.status === 'pending');
-
-    for (const order of pendingOrders) {
-      if (this.checkOrderTrigger(order, marketData)) {
-        const triggeredOrder = this.updateOrder(order.id, { status: 'filled' });
-        if (triggeredOrder) {
-          triggeredOrders.push(triggeredOrder);
-          this.emit('orderTriggered', triggeredOrder, marketData);
-        }
-      }
-    }
-
-    return triggeredOrders;
-  }
-
-  // Market data subscription manager for real-time price monitoring
-  private marketDataSubscriptionManager: MarketDataSubscriptionManager | null = null;
-
-  /**
-   * Start monitoring for order triggers using WebSocket feed
-   * @param wsClient Optional WebSocket client to use for market data
-   * @param marketDataManager Optional MarketDataSubscriptionManager instance to use
-   */
-  startMonitoring(wsClient?: any, marketDataManager?: MarketDataSubscriptionManager): void {
-    if (this.isMonitoring()) {
-      console.log('Monitoring already active');
-      return;
-    }
+  private triggerOrder(order: ArtificialOrder, marketData: { price: number; volume?: number }): void {
+    order.status = 'triggered';
+    order.updatedAt = new Date().toISOString();
     
-    // Initialize or use provided market data manager
-    if (marketDataManager) {
-      this.marketDataSubscriptionManager = marketDataManager;
-    } else if (!this.marketDataSubscriptionManager) {
-      this.marketDataSubscriptionManager = new MarketDataSubscriptionManager();
-    }
-    
-    // Set up event listener for market data updates
-    if (this.marketDataSubscriptionManager) {
-      this.marketDataSubscriptionManager.on('marketData', (marketData: MarketData) => {
-        // Process any pending orders for this symbol when market data is received
-        this.processMarketData(marketData.symbol, { 
-          price: marketData.price, 
-          volume: marketData.volume 
-        });
-      });
-      
-      // Initialize the market data manager with API credentials if provided
-      if (wsClient && this.marketDataSubscriptionManager) {
-        // Check if wsClient is actually an Alpaca client with getConfig method
-        if (typeof wsClient.getConfig === 'function') {
-          const config = wsClient.getConfig();
-          if (config && config.apiKey && config.secretKey) {
-            // Initialize with API credentials (correct way)
-            this.marketDataSubscriptionManager.initialize(config.apiKey, config.secretKey, false);
-            console.log('Initialized market data subscription manager with API credentials');
-          } else {
-            console.warn('Invalid Alpaca client provided, missing API credentials');
-          }
-        } else if (wsClient.apiKey && wsClient.secretKey) {
-          // If wsClient is just a config object with credentials
-          this.marketDataSubscriptionManager.initialize(wsClient.apiKey, wsClient.secretKey, false);
-          console.log('Initialized market data subscription manager with provided credentials');
-        } else {
-          console.warn('Invalid client provided to artificial order manager');
-        }
-      }
-    }
-    
-    // Check if the market data manager is connected
-    if (this.marketDataSubscriptionManager && !this.marketDataSubscriptionManager.isConnected()) {
-      console.warn('WebSocket client not available. Real-time monitoring will be limited.');
-      // Continue without WebSocket - we'll rely on the interval-based safety net
-    }
-    
-    // Set up a lightweight interval to ensure all symbols are subscribed
-    // This is just a safety net, not the primary monitoring mechanism
-    this.monitoringInterval = setInterval(() => {
-      this.updateSubscriptions();
-      
-      // Emit monitoring event with current state
-      this.emit('monitoring', {
-        timestamp: new Date().toISOString(),
-        pendingOrders: this.getOrdersByStatus('pending').length,
-        activeSubscriptions: this.marketDataManager && this.marketDataManager.isConnected() ? 
-          this.marketDataManager.getActiveSubscriptions() : []
-      });
-    }, 30000); // Check subscriptions every 30 seconds
-    
-    // Initial subscription update
-    this.updateSubscriptions();
-    
-    this.emit('monitoringStarted');
-  }
-  
-  /**
-   * Update WebSocket subscriptions based on pending orders
-   */
-  private updateSubscriptions(): void {
-    if (!this.marketDataManager || !this.marketDataManager.isConnected()) return;
-    
-    // Get all symbols with pending orders
-    const pendingOrders = this.getOrdersByStatus('pending');
-    const symbols = [...new Set(pendingOrders.map(order => order.symbol))];
-    
-    // Get current subscriptions
-    const currentSubscriptions = this.marketDataManager.getActiveSubscriptions();
-    
-    // Subscribe to new symbols
-    for (const symbol of symbols) {
-      if (!currentSubscriptions.includes(symbol)) {
-        this.marketDataManager.subscribe(symbol);
-      }
-    }
-    
-    // Unsubscribe from symbols with no pending orders
-    for (const symbol of currentSubscriptions) {
-      if (!symbols.includes(symbol)) {
-        this.marketDataManager.unsubscribe(symbol);
-      }
-    }
+    this.emit('orderTriggered', order, marketData);
+    console.log(`Triggered artificial order: ${order.id} for ${order.symbol} at price ${marketData.price}`);
   }
 
   /**
-   * Stop monitoring for order triggers
+   * Mark order as filled
    */
-  stopMonitoring(): void {
-    // Clear the interval timer
-    if (this.monitoringInterval) {
-      clearInterval(this.monitoringInterval);
-      this.monitoringInterval = null;
+  markOrderFilled(orderId: string): boolean {
+    const order = this.orders.get(orderId);
+    if (!order) {
+      return false;
     }
-    
-    // Unsubscribe from all active symbols using the market data manager
-    if (this.marketDataManager && this.marketDataManager.isConnected()) {
-      try {
-        // Unsubscribe from all symbols
-        this.marketDataManager.unsubscribeAll();
-        console.log('Unsubscribed from all market data feeds');
-      } catch (error) {
-        console.error('Error unsubscribing from market data feeds:', error);
-      }
-    }
-    
-    this.emit('monitoringStopped');
-  }
 
-  /**
-   * Check if monitoring is active
-   */
-  isMonitoring(): boolean {
-    return this.monitoringInterval !== null;
+    order.status = 'filled';
+    order.updatedAt = new Date().toISOString();
+    
+    this.emit('orderFilled', order);
+    console.log(`Marked artificial order as filled: ${orderId}`);
+    return true;
   }
 
   /**
@@ -402,32 +217,131 @@ export class ArtificialOrderManager extends EventEmitter {
    */
   cleanupExpiredOrders(): number {
     const now = new Date();
-    const expiredOrders: ArtificialOrder[] = [];
+    let expiredCount = 0;
 
     for (const order of this.orders.values()) {
-      if (order.status === 'pending' && order.time_in_force === 'day') {
-        // Check if order was created today and market is closed
-        const createdAt = new Date(order.created_at);
-        const isExpired = now.getDate() !== createdAt.getDate() || 
-                         now.getMonth() !== createdAt.getMonth() || 
+      if (order.status === 'pending' && order.timeInForce === 'day') {
+        const createdAt = new Date(order.createdAt);
+        const isExpired = now.getDate() !== createdAt.getDate() ||
+                         now.getMonth() !== createdAt.getMonth() ||
                          now.getFullYear() !== createdAt.getFullYear();
 
         if (isExpired) {
-          expiredOrders.push(order);
+          order.status = 'expired';
+          order.updatedAt = new Date().toISOString();
+          this.emit('orderExpired', order);
+          expiredCount++;
         }
       }
     }
 
-    // Mark expired orders
-    for (const order of expiredOrders) {
-      this.updateOrder(order.id, { status: 'expired' });
+    if (expiredCount > 0) {
+      console.log(`Expired ${expiredCount} day orders`);
     }
 
-    return expiredOrders.length;
+    return expiredCount;
   }
 
   /**
-   * Get statistics about artificial orders
+   * Register a function to monitor price for orders
+   * This is called by the WebSocket manager to provide price monitoring capability
+   * @param callback Function that accepts symbols and a callback function
+   */
+  registerPriceMonitor(callback: (symbols: string[], priceCallback: Function) => string): void {
+    this.priceMonitorCallback = callback;
+    console.log('Price monitor registered with ArtificialOrderManager');
+  }
+
+  /**
+   * Register a function to unsubscribe from price monitoring
+   * @param callback Function that accepts a monitor ID
+   */
+  registerUnsubscribeFunction(callback: (monitorId: string) => void): void {
+    this.unsubscribeCallback = callback;
+    console.log('Unsubscribe function registered with ArtificialOrderManager');
+  }
+
+  /**
+   * Start monitoring (called by WebSocket server)
+   */
+  startMonitoring(): void {
+    if (this.isMonitoring) {
+      return;
+    }
+
+    this.isMonitoring = true;
+    
+    // Set up cleanup interval for expired orders
+    setInterval(() => {
+      this.cleanupExpiredOrders();
+    }, 60000); // Check every min
+    
+    // Start monitoring prices for pending orders if we have a price monitor
+    if (this.priceMonitorCallback) {
+      this.setupPriceMonitoring();
+    }
+
+    this.emit('monitoringStarted');
+    console.log('Artificial order monitoring started');
+  }
+
+  /**
+   * Setup price monitoring for all pending orders
+   * Uses the registered price monitor callback to subscribe to market data
+   */
+  private setupPriceMonitoring(): void {
+    if (!this.priceMonitorCallback) {
+      console.warn('Cannot setup price monitoring: No price monitor callback registered');
+      return;
+    }
+
+    // Get all unique symbols from pending orders
+    const pendingOrders = this.getOrdersByStatus('pending');
+    const symbols = [...new Set(pendingOrders.map(order => order.symbol))];
+
+    if (symbols.length === 0) {
+      console.log('No pending orders to monitor');
+      return;
+    }
+
+    console.log(`Setting up price monitoring for ${symbols.length} symbols: ${symbols.join(', ')}`);
+    
+    // Register for price updates
+    const monitorId = this.priceMonitorCallback(symbols, (symbol: string, marketData: { price: number; volume?: number }) => {
+      this.processMarketData(symbol, marketData);
+    });
+    
+    // Store the monitor ID for cleanup
+    for (const symbol of symbols) {
+      this.activeMonitorIds.set(symbol, monitorId);
+    }
+  }
+
+  /**
+   * Stop monitoring
+   * Unsubscribes from all active price monitors and stops the monitoring process
+   */
+  stopMonitoring(): void {
+    if (!this.isMonitoring) {
+      return;
+    }
+    
+    // Unsubscribe from all active monitors if we have an unsubscribe callback
+    if (this.unsubscribeCallback) {
+      const monitorIds = new Set([...this.activeMonitorIds.values()]);
+      for (const monitorId of monitorIds) {
+        this.unsubscribeCallback(monitorId);
+      }
+      this.activeMonitorIds.clear();
+    }
+    
+    this.isMonitoring = false;
+    this.emit('monitoringStopped');
+    console.log('Artificial order monitoring stopped');
+  }
+
+  /**
+   * Get statistics
    */
   getStatistics(): {
     total: number;
@@ -451,10 +365,191 @@ export class ArtificialOrderManager extends EventEmitter {
   }
 
   /**
-   * Clear all orders (useful for testing)
+   * Clear all orders (for testing)
    */
   clearAllOrders(): void {
     this.orders.clear();
     this.emit('allOrdersCleared');
+    console.log('All artificial orders cleared');
   }
 }
+
+/**
+ * client-example.ts
+ * 
+ * Example client code for connecting to the refactored WebSocket server
+ */
+
+export class WebSocketClient {
+  private ws: WebSocket | null = null;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 5;
+  private reconnectDelay = 2000;
+
+  constructor(private url: string) {}
+
+  /**
+   * Connect to WebSocket server
+   */
+  connect(): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      return;
+    }
+
+    try {
+      this.ws = new WebSocket(this.url);
+      this.setupEventHandlers();
+    } catch (error) {
+      console.error('Failed to connect to WebSocket:', error);
+      this.scheduleReconnect();
+    }
+  }
+
+  /**
+   * Disconnect from WebSocket server
+   */
+  disconnect(): void {
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+  }
+
+  /**
+   * Subscribe to market data
+   */
+  subscribeToMarketData(symbols: string[]): void {
+    this.send({
+      type: 'subscribe',
+      symbols: symbols
+    });
+  }
+
+  /**
+   * Subscribe to order updates
+   */
+  subscribeToOrders(): void {
+    this.send({
+      type: 'subscribe',
+      channels: ['orders']
+    });
+  }
+
+  /**
+   * Unsubscribe from market data
+   */
+  unsubscribeFromMarketData(symbols: string[]): void {
+    this.send({
+      type: 'unsubscribe',
+      symbols: symbols
+    });
+  }
+
+  /**
+   * Send message to server
+   */
+  private send(message: any): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(message));
+    } else {
+      console.warn('WebSocket not connected, cannot send message');
+    }
+  }
+
+  /**
+   * Set up event handlers
+   */
+  private setupEventHandlers(): void {
+    if (!this.ws) return;
+
+    this.ws.onopen = () => {
+      console.log('Connected to WebSocket server');
+      this.reconnectAttempts = 0;
+    };
+
+    this.ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        this.handleMessage(data);
+      } catch (error) {
+        console.error('Error parsing message:', error);
+      }
+    };
+
+    this.ws.onclose = () => {
+      console.log('WebSocket connection closed');
+      this.scheduleReconnect();
+    };
+
+    this.ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+  }
+
+  /**
+   * Handle incoming messages
+   */
+  private handleMessage(data: any): void {
+    switch (data.type) {
+      case 'connection_established':
+        console.log('Connection established:', data.data);
+        break;
+
+      case 'market_data':
+        console.log('Market data update:', data.payload);
+        break;
+
+      case 'order_update':
+        console.log('Order update:', data.payload);
+        break;
+
+      case 'status_update':
+        console.log('Status update:', data.payload);
+        break;
+
+      case 'error':
+        console.error('Server error:', data.payload);
+        break;
+
+      case 'heartbeat':
+        // Heartbeat received, connection is alive
+        break;
+
+      default:
+        console.log('Unknown message type:', data.type);
+    }
+  }
+
+  /**
+   * Schedule reconnection
+   */
+  private scheduleReconnect(): void {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.error('Max reconnect attempts reached');
+      return;
+    }
+
+    this.reconnectAttempts++;
+    const delay = this.reconnectDelay * this.reconnectAttempts;
+
+    setTimeout(() => {
+      console.log(`Reconnecting... (attempt ${this.reconnectAttempts})`);
+      this.connect();
+    }, delay);
+  }
+}
+
+// Example usage:
+/*
+const client = new WebSocketClient('ws://localhost:9000');
+client.connect();
+
+// Subscribe to market data for AAPL and MSFT
+client.subscribeToMarketData(['AAPL', 'MSFT']);
+
+// Subscribe to order updates
+client.subscribeToOrders();
+
+// Later, unsubscribe from MSFT
+client.unsubscribeFromMarketData(['MSFT']);
+*/

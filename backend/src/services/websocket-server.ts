@@ -1,536 +1,383 @@
 /**
  * websocket-server.ts
  * 
- * This file contains the implementation for the WebSocket server.
+ * Main WebSocket server integration for the Alpaca API Service
+ * Integrates the AlpacaWebSocketManager with the HTTP server
+ * 
  * Location: backend/src/services/websocket-server.ts
  * 
  * Responsibilities:
- * - Set up and manage WebSocket connections
- * - Broadcast real-time updates to connected clients
- * - Handle WebSocket subscriptions and messages
- * - Stream live market data updates
+ * - Initialize WebSocket connections to Alpaca
+ * - Manage WebSocket connections for clients
+ * - Bridge between client WebSockets and Alpaca WebSockets
+ * - Support artificial order monitoring
  */
 
 import { Server as HttpServer } from 'http';
-import WebSocket, { WebSocketServer as WSServer } from 'ws';
-import { ArtificialOrderManager } from '../core/index.js';
-import { AlpacaWebSocketController } from '../api/alpaca-websocket-controller.js';
+import * as ws from 'ws';
+import { AlpacaClient } from './alpaca-client.js';
+import { AlpacaWebSocketManager } from './websocket/alpaca-websocket-manager.js';
+import { logger } from '../utils/logger.js';
+
+// Import types for artificial orders
+type ArtificialOrderManager = any;
+
+// For compatibility with the existing codebase
+const WebSocket = ws.default || ws;
 
 /**
- * WebSocketServer class
- * 
- * Manages WebSocket connections and broadcasts real-time updates.
+ * WebSocket server for the Alpaca API Service
+ * Provides real-time market data and trading events to clients
  */
 export class WebSocketServer {
-  private wss: WSServer;
-  private subscriptions: Map<WebSocket, Set<string>> = new Map();
-  private liveStreamIntervals: Map<string, NodeJS.Timeout> = new Map();
-  // Make this public so it can be accessed from outside
-  public alpacaWebSocketController: AlpacaWebSocketController;
+  private wss: any; // WebSocket.Server
+  private alpacaClient: AlpacaClient;
+  private orderManager: ArtificialOrderManager;
+  private alpacaWsManager: AlpacaWebSocketManager;
+  private clients: Set<WebSocket> = new Set();
+  private clientMessageHandlers: Map<string, Function> = new Map();
   
   /**
-   * Constructor for WebSocketServer
-   * @param server - HTTP server to attach WebSocket server to
-   * @param alpacaClient - Alpaca client instance
-   * @param orderManager - Artificial order manager instance
+   * Constructor
+   * @param server HTTP server to attach WebSocket server to
+   * @param alpacaClient Alpaca client instance
+   * @param orderManager Artificial order manager instance
    */
-  constructor(
-    server: HttpServer,
-    private alpacaClient: any,
-    private orderManager: ArtificialOrderManager
-  ) {
+  constructor(server: HttpServer, alpacaClient: AlpacaClient, orderManager: ArtificialOrderManager) {
     // Create WebSocket server
-    this.wss = new WSServer({ server });
+    this.wss = new ws.Server({ server });
+    this.alpacaClient = alpacaClient;
+    this.orderManager = orderManager;
+    this.alpacaWsManager = new AlpacaWebSocketManager();
     
-    // Expose globally for access from other parts of the application
-    // IMPORTANT: Do this before initializing the AlpacaWebSocketController
-    // to prevent duplicate event handlers
-    global.wss = this.wss;
+    // Set up client connection handling
+    this.setupClientConnections();
     
-    // Initialize the Alpaca WebSocket controller
-    this.alpacaWebSocketController = new AlpacaWebSocketController(alpacaClient);
-    
-    // Set up event handlers
-    this.setupEventHandlers();
-    
-    // Set up heartbeat
-    this.setupHeartbeat();
+    logger.info('WebSocketServer: Initialized');
   }
   
   /**
-   * Set up WebSocket event handlers
+   * Initialize WebSocket connections to Alpaca
+   * @param apiKey Alpaca API key
+   * @param secretKey Alpaca API secret key
+   * @param isPaper Whether to use paper trading
    */
-  private setupEventHandlers(): void {
+  public async initialize(apiKey: string, secretKey: string, isPaper: boolean): Promise<void> {
+    try {
+      // Initialize Alpaca WebSocket manager
+      await this.alpacaWsManager.initialize(apiKey, secretKey, isPaper);
+      
+      // Set up event forwarding from Alpaca to clients
+      this.setupEventForwarding();
+      
+      // Set up artificial order monitoring
+      this.setupArtificialOrderMonitoring();
+      
+      logger.info('WebSocketServer: Initialized successfully');
+    } catch (error) {
+      logger.error('WebSocketServer: Initialization failed', error);
+      throw error;
+    }
+  }
+  
+  /**
+   * Set up client WebSocket connections
+   */
+  private setupClientConnections(): void {
     this.wss.on('connection', (ws: WebSocket) => {
-      console.log('Client connected to WebSocket');
+      // Add client to set
+      this.clients.add(ws);
+      logger.info(`WebSocketServerRefactored: Client connected (${this.clients.size} total)`);
       
-      // Initialize client's subscriptions
-      this.subscriptions.set(ws, new Set());
-      
-      // Send welcome message
-      this.sendMessage(ws, {
-        type: 'connection_established',
-        data: {
-          timestamp: new Date().toISOString()
-        }
+      // Send initial connection status
+      this.sendToClient(ws, {
+        type: 'connection_status',
+        status: 'connected',
+        message: 'Connected to WebSocket server'
       });
       
-      // Handle messages from client
-      ws.on('message', (message: string) => {
-        try {
-          const parsedMessage = JSON.parse(message);
-          this.handleClientMessage(ws, parsedMessage);
-        } catch (error) {
-          console.error('Error parsing WebSocket message:', error);
-          this.sendMessage(ws, {
-            type: 'error',
-            data: {
-              code: 'INVALID_MESSAGE',
-              message: 'Invalid message format',
-              timestamp: new Date().toISOString()
-            }
-          });
-        }
+      // Set up client message handling
+      ws.on('message', (data: WebSocket.Data) => {
+        this.handleClientMessage(ws, data);
       });
       
       // Handle client disconnect
       ws.on('close', () => {
-        console.log('Client disconnected from WebSocket');
-        this.handleClientDisconnect(ws);
+        this.clients.delete(ws);
+        logger.info(`WebSocketServerRefactored: Client disconnected (${this.clients.size} remaining)`);
       });
-    });
-  }
-  
-  /**
-   * Handle client disconnect
-   */
-  private handleClientDisconnect(ws: WebSocket): void {
-    // Get client's subscriptions
-    const clientSubscriptions = this.subscriptions.get(ws);
-    
-    if (clientSubscriptions) {
-      // Stop any live streams for symbols this client was subscribed to
-      clientSubscriptions.forEach(subscription => {
-        if (subscription.startsWith('market_data:')) {
-          const symbol = subscription.split(':')[1];
-          this.stopLiveStreamIfNoSubscribers(symbol);
-        }
-      });
-    }
-    
-    // Remove client from subscriptions
-    this.subscriptions.delete(ws);
-  }
-  
-  /**
-   * Stop live stream for a symbol if no clients are subscribed
-   */
-  private stopLiveStreamIfNoSubscribers(symbol: string): void {
-    // Check if any client is still subscribed to this symbol
-    let hasSubscribers = false;
-    this.subscriptions.forEach(clientSubs => {
-      if (clientSubs.has(`market_data:${symbol}`)) {
-        hasSubscribers = true;
-      }
-    });
-    
-    // If no subscribers, stop the live stream
-    if (!hasSubscribers) {
-      const intervalId = this.liveStreamIntervals.get(symbol);
-      if (intervalId) {
-        clearInterval(intervalId);
-        this.liveStreamIntervals.delete(symbol);
-        console.log(`Stopped live stream for ${symbol} - no subscribers`);
-      }
-    }
-  }
-  
-  /**
-   * Set up heartbeat to keep connections alive
-   */
-  private setupHeartbeat(): void {
-    const interval = setInterval(() => {
-      this.wss.clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-          this.sendMessage(client, {
-            type: 'heartbeat',
-            data: {
-              timestamp: new Date().toISOString()
-            }
-          });
-        }
-      });
-    }, 30000); // 30 seconds
-    
-    // Clear interval when server closes
-    this.wss.on('close', () => {
-      clearInterval(interval);
       
-      // Clear all live stream intervals
-      this.liveStreamIntervals.forEach(intervalId => {
-        clearInterval(intervalId);
+      // Handle errors
+      ws.on('error', (error) => {
+        logger.error('WebSocketServer: Client connection error', error);
+        this.clients.delete(ws);
       });
-      this.liveStreamIntervals.clear();
     });
   }
   
   /**
    * Handle messages from clients
-   * @param ws - WebSocket connection
-   * @param message - Parsed message from client
+   * @param ws Client WebSocket
+   * @param data Message data
    */
-  private handleClientMessage(ws: WebSocket, message: any): void {
-    const { type, action, data } = message;
-    
-    // Handle both old and new message formats
-    const messageType = type || action;
-    
-    switch (messageType) {
-      case 'subscribe':
-        this.handleSubscribe(ws, message);
-        break;
+  private handleClientMessage(ws: WebSocket, data: WebSocket.Data): void {
+    try {
+      const message = JSON.parse(data.toString());
       
-      case 'unsubscribe':
-        this.handleUnsubscribe(ws, message);
-        break;
-      
-      default:
-        this.sendMessage(ws, {
-          type: 'error',
-          data: {
-            code: 'UNKNOWN_MESSAGE_TYPE',
-            message: `Unknown message type: ${messageType}`,
-            timestamp: new Date().toISOString()
-          }
-        });
+      // Handle different message types
+      switch (message.type) {
+        case 'subscribe_market_data':
+          this.handleSubscribeMarketData(ws, message);
+          break;
+          
+        case 'unsubscribe_market_data':
+          this.handleUnsubscribeMarketData(ws, message);
+          break;
+          
+        case 'get_connection_status':
+          this.handleGetConnectionStatus(ws);
+          break;
+          
+        case 'ping':
+          this.sendToClient(ws, { type: 'pong', timestamp: Date.now() });
+          break;
+          
+        default:
+          logger.warn(`WebSocketServerRefactored: Unknown message type: ${message.type}`);
+          this.sendToClient(ws, {
+            type: 'error',
+            message: `Unknown message type: ${message.type}`
+          });
+          break;
+      }
+    } catch (error) {
+      logger.error('WebSocketServer: Error parsing client message', error);
+      this.sendToClient(ws, {
+        type: 'error',
+        message: 'Invalid message format'
+      });
     }
   }
   
   /**
-   * Handle subscription requests
-   * @param ws - WebSocket connection
-   * @param message - Subscription message
+   * Handle subscribe_market_data message
+   * @param ws Client WebSocket
+   * @param message Message data
    */
-  private async handleSubscribe(ws: WebSocket, message: any): Promise<void> {
-    const { symbols = [], dataTypes = [], channels = [], data } = message;
-    const clientSubscriptions = this.subscriptions.get(ws);
+  private handleSubscribeMarketData(ws: WebSocket, message: any): void {
+    const { symbols, channels } = message;
     
-    if (!clientSubscriptions) return;
-    
-    // Handle both old and new formats
-    const symbolsToSubscribe = symbols.length > 0 ? symbols : (data?.symbols || []);
-    const channelsToSubscribe = channels.length > 0 ? channels : (data?.channels || dataTypes);
-    
-    // Add new subscriptions
-    for (const symbol of symbolsToSubscribe) {
-      for (const channel of channelsToSubscribe) {
-        const subscription = `${channel}:${symbol}`;
-        clientSubscriptions.add(subscription);
-        
-        // If it's a market data subscription, start live streaming
-        if (channel === 'market_data') {
-          await this.startLiveStreamForSymbol(symbol);
-          // Send initial data immediately
-          await this.sendInitialMarketData(ws, symbol);
-        }
-      }
+    if (!symbols || !Array.isArray(symbols) || symbols.length === 0) {
+      this.sendToClient(ws, {
+        type: 'error',
+        message: 'Invalid symbols'
+      });
+      return;
     }
     
-    // Confirm subscription
-    this.sendMessage(ws, {
+    // Subscribe to market data
+    this.alpacaWsManager.subscribeToMarketData(symbols, channels);
+    
+    // Register client-specific handlers for these symbols
+    symbols.forEach(symbol => {
+      // For trades
+      const tradeHandler = (data: any) => {
+        if (data.symbol === symbol) {
+          this.sendToClient(ws, {
+            type: 'market_data',
+            subType: 'trade',
+            data
+          });
+        }
+      };
+      
+      // For quotes
+      const quoteHandler = (data: any) => {
+        if (data.symbol === symbol) {
+          this.sendToClient(ws, {
+            type: 'market_data',
+            subType: 'quote',
+            data
+          });
+        }
+      };
+      
+      // Store handlers so we can remove them later
+      this.clientMessageHandlers.set(`trade:${symbol}:${ws.url}`, tradeHandler);
+      this.clientMessageHandlers.set(`quote:${symbol}:${ws.url}`, quoteHandler);
+      
+      // Register handlers
+      this.alpacaWsManager.on(`trade:${symbol}`, tradeHandler);
+      this.alpacaWsManager.on(`quote:${symbol}`, quoteHandler);
+    });
+    
+    this.sendToClient(ws, {
       type: 'subscription_success',
-      data: {
-        symbols: symbolsToSubscribe,
-        channels: channelsToSubscribe,
-        timestamp: new Date().toISOString()
-      }
+      symbols,
+      channels
     });
   }
   
   /**
-   * Handle unsubscribe requests
-   * @param ws - WebSocket connection
-   * @param message - Unsubscribe message
+   * Handle unsubscribe_market_data message
+   * @param ws Client WebSocket
+   * @param message Message data
    */
-  private handleUnsubscribe(ws: WebSocket, message: any): void {
-    const { symbols = [], dataTypes = [], channels = [], data } = message;
-    const clientSubscriptions = this.subscriptions.get(ws);
+  private handleUnsubscribeMarketData(ws: WebSocket, message: any): void {
+    const { symbols } = message;
     
-    if (!clientSubscriptions) return;
-    
-    // Handle both old and new formats
-    const symbolsToUnsubscribe = symbols.length > 0 ? symbols : (data?.symbols || []);
-    const channelsToUnsubscribe = channels.length > 0 ? channels : (data?.channels || dataTypes);
-    
-    // Remove subscriptions
-    for (const symbol of symbolsToUnsubscribe) {
-      for (const channel of channelsToUnsubscribe) {
-        const subscription = `${channel}:${symbol}`;
-        clientSubscriptions.delete(subscription);
-        
-        // If it's a market data subscription, potentially stop live streaming
-        if (channel === 'market_data') {
-          this.stopLiveStreamIfNoSubscribers(symbol);
-        }
-      }
+    if (!symbols || !Array.isArray(symbols) || symbols.length === 0) {
+      this.sendToClient(ws, {
+        type: 'error',
+        message: 'Invalid symbols'
+      });
+      return;
     }
     
-    // Confirm unsubscription
-    this.sendMessage(ws, {
+    // Remove client-specific handlers for these symbols
+    symbols.forEach(symbol => {
+      const tradeHandlerKey = `trade:${symbol}:${ws.url}`;
+      const quoteHandlerKey = `quote:${symbol}:${ws.url}`;
+      
+      if (this.clientMessageHandlers.has(tradeHandlerKey)) {
+        this.alpacaWsManager.off(`trade:${symbol}`, this.clientMessageHandlers.get(tradeHandlerKey)!);
+        this.clientMessageHandlers.delete(tradeHandlerKey);
+      }
+      
+      if (this.clientMessageHandlers.has(quoteHandlerKey)) {
+        this.alpacaWsManager.off(`quote:${symbol}`, this.clientMessageHandlers.get(quoteHandlerKey)!);
+        this.clientMessageHandlers.delete(quoteHandlerKey);
+      }
+    });
+    
+    this.sendToClient(ws, {
       type: 'unsubscription_success',
-      data: {
-        symbols: symbolsToUnsubscribe,
-        channels: channelsToUnsubscribe,
-        timestamp: new Date().toISOString()
-      }
+      symbols
     });
   }
   
   /**
-   * Start live streaming for a symbol
-   * @param symbol - Symbol to stream
+   * Handle get_connection_status message
+   * @param ws Client WebSocket
    */
-  private async startLiveStreamForSymbol(symbol: string): Promise<void> {
-    try {
-      if (this.liveStreamIntervals.has(symbol)) {
-        console.log(`Live stream for ${symbol} already running`);
-        return;
-      }
-      
-      // Use the AlpacaWebSocketController to subscribe to market data
-      await this.alpacaWebSocketController.subscribeToMarketData(symbol, (marketData) => {
-        // When market data is received, broadcast it to all subscribed clients
-        this.broadcastMarketData(symbol, marketData);
+  private handleGetConnectionStatus(ws: WebSocket): void {
+    const status = this.alpacaWsManager.getConnectionStatus();
+    
+    this.sendToClient(ws, {
+      type: 'connection_status',
+      marketData: status.marketData,
+      tradingEvents: status.tradingEvents
+    });
+  }
+  
+  /**
+   * Set up event forwarding from Alpaca to clients
+   */
+  private setupEventForwarding(): void {
+    // Forward order updates to all clients
+    this.alpacaWsManager.on('orderUpdate', (data: any) => {
+      this.broadcastToClients({
+        type: 'order_update',
+        data
       });
-      
-      // Set up interval to fetch and broadcast market data
-      const intervalId = setInterval(() => {
-        this.fetchAndBroadcastMarketData(symbol).catch(error => {
-          console.error(`Error fetching market data for ${symbol}:`, error);
-        });
-      }, 5000); // Update every 5 seconds
-      
-      this.liveStreamIntervals.set(symbol, intervalId);
-      console.log(`Live stream started for ${symbol}`);
-    } catch (error) {
-      console.error(`Failed to start live stream for ${symbol}:`, error);
-    }
-  }
-  
-  /**
-   * Fetch and broadcast market data for a symbol
-   * @param symbol - Symbol to fetch data for
-   */
-  private async fetchAndBroadcastMarketData(symbol: string): Promise<void> {
-    try {
-      const isCrypto = symbol.includes('/');
-      let marketData: any;
-      
-      if (isCrypto) {
-        const snapshots = await this.alpacaClient.getCryptoSnapshots([symbol]);
-        marketData = {
-          symbol,
-          bar: snapshots.snapshots?.[symbol]?.latestBar || null,
-          quote: snapshots.snapshots?.[symbol]?.latestQuote || null,
-          asset: null,
-          isCrypto: true,
-          timestamp: new Date().toISOString()
-        };
-      } else {
-        const [barData, quoteData, assetData] = await Promise.all([
-          this.alpacaClient.getStocksBarsLatest([symbol]).catch(() => ({ bars: {} })),
-          this.alpacaClient.getStocksQuotesLatest([symbol]).catch(() => ({ quotes: {} })),
-          this.alpacaClient.getAsset(symbol).catch(() => null)
-        ]);
-        
-        marketData = {
-          symbol,
-          bar: barData.bars?.[symbol] || null,
-          quote: quoteData.quotes?.[symbol] || null,
-          asset: assetData || null,
-          isCrypto: false,
-          timestamp: new Date().toISOString()
-        };
-      }
-      
-      // Broadcast the market data to all subscribed clients
-      this.broadcastMarketData(symbol, marketData);
-      
-    } catch (error) {
-      console.error(`Error fetching and broadcasting market data for ${symbol}:`, error);
-    }
-  }
-  
-  /**
-   * Send initial market data to a specific client
-   * @param ws - WebSocket connection
-   * @param symbol - Symbol to send data for
-   */
-  private async sendInitialMarketData(ws: WebSocket, symbol: string): Promise<void> {
-    try {
-      const isCrypto = symbol.includes('/');
-      let marketData: any;
-      
-      if (isCrypto) {
-        const snapshots = await this.alpacaClient.getCryptoSnapshots([symbol]);
-        marketData = {
-          symbol,
-          bar: snapshots.snapshots?.[symbol]?.latestBar || null,
-          quote: snapshots.snapshots?.[symbol]?.latestQuote || null,
-          asset: null,
-          isCrypto: true,
-          timestamp: new Date().toISOString()
-        };
-      } else {
-        const [barData, quoteData, assetData] = await Promise.all([
-          this.alpacaClient.getStocksBarsLatest([symbol]).catch(() => ({ bars: {} })),
-          this.alpacaClient.getStocksQuotesLatest([symbol]).catch(() => ({ quotes: {} })),
-          this.alpacaClient.getAsset(symbol).catch(() => null)
-        ]);
-        
-        marketData = {
-          symbol,
-          bar: barData.bars?.[symbol] || null,
-          quote: quoteData.quotes?.[symbol] || null,
-          asset: assetData || null,
-          isCrypto: false,
-          timestamp: new Date().toISOString()
-        };
-      }
-      
-      // Send initial market data
-      this.sendMessage(ws, {
-        type: 'market_data',
-        payload: marketData
+    });
+    
+    // Forward connection status changes
+    this.alpacaWsManager.on('marketData:connected', () => {
+      this.broadcastToClients({
+        type: 'connection_status',
+        service: 'marketData',
+        status: 'connected'
       });
-      
-    } catch (error) {
-      console.error(`Error sending initial market data for ${symbol}:`, error);
-    }
+    });
+    
+    this.alpacaWsManager.on('marketData:disconnected', () => {
+      this.broadcastToClients({
+        type: 'connection_status',
+        service: 'marketData',
+        status: 'disconnected'
+      });
+    });
+    
+    this.alpacaWsManager.on('tradingEvents:connected', () => {
+      this.broadcastToClients({
+        type: 'connection_status',
+        service: 'tradingEvents',
+        status: 'connected'
+      });
+    });
+    
+    this.alpacaWsManager.on('tradingEvents:disconnected', () => {
+      this.broadcastToClients({
+        type: 'connection_status',
+        service: 'tradingEvents',
+        status: 'disconnected'
+      });
+    });
   }
   
   /**
-   * Send a message to a WebSocket client
-   * @param ws - WebSocket connection
-   * @param message - Message to send
+   * Set up artificial order monitoring
    */
-  private sendMessage(ws: WebSocket, message: any): void {
+  private setupArtificialOrderMonitoring(): void {
+    // Register the order manager with the WebSocket manager for price monitoring
+    this.orderManager.registerPriceMonitor((symbols: string[], callback: Function) => {
+      return this.alpacaWsManager.monitorPriceForOrders(symbols, callback as any);
+    });
+    
+    // Register the unsubscribe function
+    this.orderManager.registerUnsubscribeFunction((monitorId: string) => {
+      this.alpacaWsManager.stopMonitoringSymbol(monitorId);
+    });
+    
+    logger.info('WebSocketServer: Artificial order monitoring set up');
+  }
+  
+  /**
+   * Send a message to a specific client
+   * @param ws Client WebSocket
+   * @param message Message to send
+   */
+  private sendToClient(ws: WebSocket, message: any): void {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(message));
     }
   }
   
   /**
-   * Broadcast a message to all subscribed clients
-   * @param type - Data type (e.g., 'quotes', 'trades')
-   * @param symbol - Stock symbol
-   * @param data - Data to broadcast
+   * Broadcast a message to all connected clients
+   * @param message Message to broadcast
    */
-  public broadcast(type: string, symbol: string, data: any): void {
-    const subscription = `${type}:${symbol}`;
+  private broadcastToClients(message: any): void {
+    const messageStr = JSON.stringify(message);
     
-    this.wss.clients.forEach(client => {
+    this.clients.forEach(client => {
       if (client.readyState === WebSocket.OPEN) {
-        const clientSubscriptions = this.subscriptions.get(client);
-        
-        if (clientSubscriptions && clientSubscriptions.has(subscription)) {
-          this.sendMessage(client, {
-            type,
-            data: {
-              ...data,
-              symbol,
-              timestamp: new Date().toISOString()
-            }
-          });
-        }
-      }
-    });
-  }
-
-  /**
-   * Broadcast market data update to all subscribed clients
-   * @param symbol - Stock symbol
-   * @param marketData - Market data to broadcast
-   */
-  public broadcastMarketData(symbol: string, marketData: any): void {
-    const subscription = `market_data:${symbol}`;
-    
-    this.wss.clients.forEach(client => {
-      if (client.readyState === WebSocket.OPEN) {
-        const clientSubscriptions = this.subscriptions.get(client);
-        
-        if (clientSubscriptions && clientSubscriptions.has(subscription)) {
-          this.sendMessage(client, {
-            type: 'market_data_update',
-            payload: {
-              ...marketData,
-              symbol,
-              timestamp: new Date().toISOString()
-            }
-          });
-        }
+        client.send(messageStr);
       }
     });
   }
   
   /**
-   * Broadcast an order update to all clients
-   * @param order - Order data
+   * Shutdown the WebSocket server
    */
-  public broadcastOrderUpdate(order: any): void {
-    this.broadcast('order_update', order.symbol, order);
-  }
-  
-  /**
-   * Broadcast a position update to all clients
-   * @param position - Position data
-   */
-  public broadcastPositionUpdate(position: any): void {
-    this.broadcast('position_update', position.symbol, position);
-  }
-  
-  /**
-   * Get connection statistics
-   */
-  public getStats(): any {
-    const connectionCount = this.wss.clients.size;
-    const subscriptionCount = Array.from(this.subscriptions.values())
-      .reduce((total, subs) => total + subs.size, 0);
-    const liveStreamCount = this.liveStreamIntervals.size;
+  public async shutdown(): Promise<void> {
+    logger.info('WebSocketServer: Shutting down...');
     
-    return {
-      connections: connectionCount,
-      subscriptions: subscriptionCount,
-      liveStreams: liveStreamCount,
-      symbols: Array.from(this.liveStreamIntervals.keys())
-    };
-  }
-  
-  /**
-   * Close the WebSocket server
-   */
-  public close(): void {
-    // Clear all live stream intervals
-    this.liveStreamIntervals.forEach(intervalId => {
-      clearInterval(intervalId);
+    // Shutdown Alpaca WebSocket manager
+    await this.alpacaWsManager.shutdown();
+    
+    // Close all client connections
+    this.clients.forEach(client => {
+      client.close();
     });
-    this.liveStreamIntervals.clear();
     
+    // Clear client set
+    this.clients.clear();
+    
+    // Close WebSocket server
     this.wss.close();
+    
+    logger.info('WebSocketServer: Shutdown complete');
   }
-}
-
-/**
- * Set up the WebSocket server
- * @param server - HTTP server to attach WebSocket server to
- * @param alpacaClient - Alpaca client instance
- * @param orderManager - Artificial order manager instance
- * @returns WebSocketServer instance
- */
-export function setupWebSocketServer(
-  server: HttpServer,
-  alpacaClient: any,
-  orderManager: ArtificialOrderManager
-): WebSocketServer {
-  return new WebSocketServer(server, alpacaClient, orderManager);
 }
