@@ -6,8 +6,8 @@
  */
 
 import WebSocket from 'ws';
-import { logger } from '../../utils/logger';
-import { AlpacaWebSocketManager, MarketDataSubscription } from './alpaca-websocket-manager';
+import { logger } from '../../utils/logger.js';
+import { AlpacaWebSocketManager, MarketDataSubscription } from './alpaca-websocket-manager.js';
 
 /**
  * Handles market data WebSocket messages and subscriptions

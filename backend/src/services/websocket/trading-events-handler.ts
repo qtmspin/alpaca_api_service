@@ -6,8 +6,8 @@
  */
 
 import WebSocket from 'ws';
-import { logger } from '../../utils/logger';
-import { AlpacaWebSocketManager } from './alpaca-websocket-manager';
+import { logger } from '../../utils/logger.js';
+import { AlpacaWebSocketManager } from './alpaca-websocket-manager.js';
 
 /**
  * Handles trading events WebSocket messages and subscriptions

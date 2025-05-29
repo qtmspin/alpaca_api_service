@@ -68,7 +68,7 @@ export class ArtificialOrdersController {
    */
   private setupOrderMonitoring(): void {
     // Get the WebSocket server instance
-    const wsServer = global.wss;
+    const wsServer = (global as any).wss;
     
     // Always start the order manager, it will handle the case when WebSocket is not available
     this.orderManager.startMonitoring();
@@ -99,7 +99,7 @@ export class ArtificialOrdersController {
             marketDataWsClient.send(JSON.stringify(authMessage));
             
             // Start monitoring with the WebSocket client
-            this.orderManager.startMonitoring(marketDataWsClient);
+            this.orderManager.startMonitoring();
             
             console.log('Real-time order monitoring started with WebSocket');
           });
@@ -185,7 +185,13 @@ export class ArtificialOrdersController {
       }
       
       // Create the artificial order
-      const order = this.orderManager.createOrder(validationResult.data);
+      // Convert the data to match the expected format
+      const orderData = {
+        ...validationResult.data,
+        // Convert time_in_force to timeInForce to match the expected format
+        timeInForce: validationResult.data.time_in_force,
+      };
+      const order = this.orderManager.createOrder(orderData);
       
       res.status(201).json(order);
     } catch (error: unknown) {

@@ -20,7 +20,8 @@ async function quickTest() {
   console.log('===================================');
   
   // Check if API keys have been updated from the template values
-  if (API_KEY === 'PKTEST_YOUR_KEY_HERE' as string || SECRET_KEY === 'YOUR_SECRET_HERE') {
+  // Use includes to check if the keys are the default template values
+  if (API_KEY.includes('YOUR_KEY_HERE') || SECRET_KEY.includes('YOUR_SECRET_HERE')) {
     console.error('❌ Please update API_KEY and SECRET_KEY in the script');
     return;
   }

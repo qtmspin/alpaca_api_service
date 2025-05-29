@@ -10,13 +10,13 @@
 
 import WebSocket from 'ws';
 import { EventEmitter } from 'events';
-import { logger } from '../../utils/logger';
+import { logger } from '../../utils/logger.js';
 import { 
   MarketDataHandler,
   TradingEventsHandler,
   WebSocketConnectionManager,
   HealthMonitor
-} from './index';
+} from './index.js';
 
 // Types for WebSocket events
 export type WebSocketType = 'marketData' | 'tradingEvents';

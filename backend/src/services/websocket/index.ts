@@ -6,8 +6,8 @@
  */
 
 // Export all WebSocket-related modules
-export * from './alpaca-websocket-manager';
-export * from './market-data-handler';
-export * from './trading-events-handler';
-export * from './websocket-connection-manager';
-export * from './health-monitor';
+export * from './alpaca-websocket-manager.js';
+export * from './market-data-handler.js';
+export * from './trading-events-handler.js';
+export * from './websocket-connection-manager.js';
+export * from './health-monitor.js';

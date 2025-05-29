@@ -68,6 +68,8 @@ type AppState = {
   orders: Order[]
   tradeLog: TradeLogEntry[]
   config: Config
+  reconnectAttempts: number
+  lastConnectionAttempt: string
   
   // Actions
   initWebSocket: () => void
@@ -98,27 +100,74 @@ export const useAppStore = create<AppState>((set, get) => ({
     maxNotionalSize: 5000,
     maxQty: 100,
   },
+  reconnectAttempts: 0,
+  lastConnectionAttempt: new Date().toISOString(),
   
   // Actions
   initWebSocket: () => {
-    set({ wsConnection: 'connecting' })
+    // Track reconnection attempts for exponential backoff
+    const state = get();
+    const reconnectAttempts = state.reconnectAttempts || 0;
     
-    const ws = new WebSocket('ws://localhost:9000')
+    set({ 
+      wsConnection: 'connecting',
+      lastConnectionAttempt: new Date().toISOString()
+    })
+    
+    const ws = new WebSocket('ws://localhost:9000/ws')
     
     ws.onopen = () => {
-      set({ wsConnection: 'connected' })
+      // Reset reconnection attempts on successful connection
+      set({ 
+        wsConnection: 'connected',
+        reconnectAttempts: 0,
+        lastConnectionAttempt: new Date().toISOString()
+      })
       
       // Subscribe to channels
       ws.send(JSON.stringify({
         action: 'subscribe',
         channels: ['orders', 'logs', 'trades', 'status']
       }))
+      
+      // Add connection success to logs
+      const logEntry: LogEntry = {
+        id: Date.now().toString(),
+        timestamp: new Date().toISOString(),
+        level: 'info',
+        message: 'Connected to WebSocket server',
+        source: 'websocket'
+      };
+      set(state => ({ logs: [logEntry, ...state.logs].slice(0, 1000) }));
     }
     
     ws.onclose = () => {
-      set({ wsConnection: 'disconnected' })
-      // Attempt to reconnect after a delay
-      setTimeout(() => get().initWebSocket(), 5000)
+      // Implement exponential backoff with jitter for reconnection
+      const maxReconnectDelay = 30000; // 30 seconds max
+      const nextAttempt = reconnectAttempts + 1;
+      
+      // Calculate delay with exponential backoff and random jitter
+      const baseDelay = Math.min(1000 * Math.pow(1.5, nextAttempt), maxReconnectDelay);
+      const jitter = Math.random() * 1000; // Add up to 1 second of jitter
+      const delay = Math.floor(baseDelay + jitter);
+      
+      set({ 
+        wsConnection: 'disconnected',
+        reconnectAttempts: nextAttempt
+      })
+      
+      // Add disconnection to logs
+      const logEntry: LogEntry = {
+        id: Date.now().toString(),
+        timestamp: new Date().toISOString(),
+        level: 'warning',
+        message: `WebSocket disconnected. Reconnecting in ${Math.round(delay/1000)} seconds (attempt ${nextAttempt})`,
+        source: 'websocket'
+      };
+      set(state => ({ logs: [logEntry, ...state.logs].slice(0, 1000) }));
+      
+      // Attempt to reconnect after calculated delay
+      setTimeout(() => get().initWebSocket(), delay)
     }
     
     ws.onerror = () => {

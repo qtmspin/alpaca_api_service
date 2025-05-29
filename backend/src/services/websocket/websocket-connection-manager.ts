@@ -6,8 +6,8 @@
  */
 
 import WebSocket from 'ws';
-import { logger } from '../../utils/logger';
-import { AlpacaWebSocketManager, WebSocketType } from './alpaca-websocket-manager';
+import { logger } from '../../utils/logger.js';
+import { AlpacaWebSocketManager, WebSocketType } from './alpaca-websocket-manager.js';
 
 /**
  * Manages WebSocket connections to Alpaca API

@@ -14,7 +14,8 @@
  */
 
 import { Server as HttpServer } from 'http';
-import * as ws from 'ws';
+import { WebSocketServer as WSServer } from 'ws';
+import WebSocket from 'ws';
 import { AlpacaClient } from './alpaca-client.js';
 import { AlpacaWebSocketManager } from './websocket/alpaca-websocket-manager.js';
 import { logger } from '../utils/logger.js';
@@ -22,15 +23,15 @@ import { logger } from '../utils/logger.js';
 // Import types for artificial orders
 type ArtificialOrderManager = any;
 
-// For compatibility with the existing codebase
-const WebSocket = ws.default || ws;
+// Type for WebSocket data
+type WebSocketData = string | Buffer | ArrayBuffer | Buffer[];
 
 /**
  * WebSocket server for the Alpaca API Service
  * Provides real-time market data and trading events to clients
  */
 export class WebSocketServer {
-  private wss: any; // WebSocket.Server
+  private wss: WSServer; // WebSocket server instance
   private alpacaClient: AlpacaClient;
   private orderManager: ArtificialOrderManager;
   private alpacaWsManager: AlpacaWebSocketManager;
@@ -44,8 +45,11 @@ export class WebSocketServer {
    * @param orderManager Artificial order manager instance
    */
   constructor(server: HttpServer, alpacaClient: AlpacaClient, orderManager: ArtificialOrderManager) {
-    // Create WebSocket server
-    this.wss = new ws.Server({ server });
+    // Create WebSocket server with explicit path
+    this.wss = new WSServer({ 
+      server,
+      path: '/ws' // Explicitly define the WebSocket path
+    });
     this.alpacaClient = alpacaClient;
     this.orderManager = orderManager;
     this.alpacaWsManager = new AlpacaWebSocketManager();
@@ -97,7 +101,7 @@ export class WebSocketServer {
       });
       
       // Set up client message handling
-      ws.on('message', (data: WebSocket.Data) => {
+      ws.on('message', (data) => {
         this.handleClientMessage(ws, data);
       });
       
@@ -108,8 +112,8 @@ export class WebSocketServer {
       });
       
       // Handle errors
-      ws.on('error', (error) => {
-        logger.error('WebSocketServer: Client connection error', error);
+      ws.on('error', (err) => {
+        logger.error('WebSocketServer: Client connection error', err);
         this.clients.delete(ws);
       });
     });
@@ -120,7 +124,7 @@ export class WebSocketServer {
    * @param ws Client WebSocket
    * @param data Message data
    */
-  private handleClientMessage(ws: WebSocket, data: WebSocket.Data): void {
+  private handleClientMessage(ws: WebSocket, data: WebSocketData): void {
     try {
       const message = JSON.parse(data.toString());
       
